@@ -14,6 +14,7 @@ const {
   stampInadimplenteFromFila,
   filaOverdueForUnit,
   needsCensus,
+  needsSaldo,
   aplicarExtratoObra
 } = require("../../lib/estoque-batimento-core");
 
@@ -488,7 +489,7 @@ async function handler(req, res) {
       state = { date: today, seen: [], processed: 0, failed: 0, passes: 0, skippedSettled: 0, done: false };
     }
     if (!Array.isArray(state.seen)) state.seen = [];
-    if (state.done) {
+    if (state.done && !force) {
       return res.status(200).json({
         done: true,
         date: today,
@@ -496,6 +497,11 @@ async function handler(req, res) {
         skippedSettled: state.skippedSettled,
         message: "Batimento do dia já concluído."
       });
+    }
+    if (state.done && force) {
+      state.done = false;
+      state.saldoSeen = [];
+      state.saldoFalhas = {};
     }
     const continuacao = flag(req, "cont") === "1";
     if (!force && !continuacao && Number(state.passes) > 0) {
@@ -634,6 +640,20 @@ async function handler(req, res) {
       });
     };
 
+    const fetchSaldo = async (customerId) => {
+      const mine = [...byId.values()].filter((u) => String(u.customerId) === String(customerId) && needsSaldo(u));
+      if (!mine.length) return;
+      const [billsRes, stmtRes] = await Promise.all([
+        siengeFetch(`${SIENGE_API_BASE}/accounts-receivable/receivable-bills?customerId=${encodeURIComponent(customerId)}&limit=100&offset=0`, 3),
+        siengeFetch(`${SIENGE_API_BASE}/customer-financial-statements?customerId=${encodeURIComponent(customerId)}&includeSubJudice=true&includeRemadeInstallments=N&includeRenegotiation=N`, 3)
+      ]);
+      const classified = classifyCustomerUnits(mine, extractRows(billsRes), flattenStatements(stmtRes), { includeSettled: true, censusAt: today });
+      classified.forEach((u) => {
+        byId.set(String(u.id), u);
+        if (u.enterpriseId) dirtyCc.add(String(u.enterpriseId));
+      });
+    };
+
     let i = 0;
     let processed = Number(state.processed) || 0;
     let failed = Number(state.failed) || 0;
@@ -697,7 +717,46 @@ async function handler(req, res) {
     state.censusLeft = restCensus;
     state.fichaLeft = restObras;
     state.obrasLeft = restObras;
-    state.done = restCensus === 0 && restObras === 0;
+
+    if (!Array.isArray(state.saldoSeen)) state.saldoSeen = [];
+    if (!state.saldoFalhas || typeof state.saldoFalhas !== "object") state.saldoFalhas = {};
+    const saldoSeen = new Set(state.saldoSeen.map(String));
+    let saldoLeft = 0;
+    if (restCensus === 0 && restObras === 0) {
+      const filaSaldo = [];
+      const ja = new Set();
+      byId.forEach((u) => {
+        if (!needsSaldo(u)) return;
+        const cid = String(u.customerId);
+        if (saldoSeen.has(cid) || ja.has(cid)) return;
+        ja.add(cid);
+        filaSaldo.push(cid);
+      });
+      let s = 0;
+      while (s < filaSaldo.length && Date.now() - started < BUDGET_MS) {
+        const batch = filaSaldo.slice(s, s + CONCURRENCY);
+        s += batch.length;
+        const results = await Promise.allSettled(batch.map((cid) => fetchSaldo(cid)));
+        results.forEach((r, k) => {
+          const cid = String(batch[k]);
+          if (r.status === "fulfilled") {
+            saldoSeen.add(cid);
+            delete state.saldoFalhas[cid];
+            processed += 1;
+          } else {
+            failed += 1;
+            const nFail = (Number(state.saldoFalhas[cid]) || 0) + 1;
+            state.saldoFalhas[cid] = nFail;
+            if (nFail >= 2) saldoSeen.add(cid);
+            log.push(`saldo ${cid}: ${(r.reason && r.reason.message) || r.reason}`);
+          }
+        });
+      }
+      state.saldoSeen = [...saldoSeen];
+      saldoLeft = filaSaldo.filter((id) => !saldoSeen.has(String(id))).length;
+    }
+    state.saldoLeft = saldoLeft;
+    state.done = restCensus === 0 && restObras === 0 && saldoLeft === 0;
     state.obrasPuladas = Object.keys(state.obraFalhas || {}).filter((id) => Number(state.obraFalhas[id]) >= 2);
     const nextUnits = [...byId.values()];
     const n = await persistSnapshot(nextUnits, state.done);
@@ -716,13 +775,16 @@ async function handler(req, res) {
       censusLeft: restCensus,
       fichaLeft: restObras,
       obrasLeft: restObras,
+      saldoLeft,
       dirtyCc: dirtyCc.size,
       caixaPosicao: n,
       message: state.done
         ? "Batimento do dia concluído. Contratos ativos conferidos pelo extrato do empreendimento."
         : (restCensus
           ? `Faltam ${restCensus} cliente(s) no censo.`
-          : `Faltam ${restObras} empreendimento(s) na conferência de vencido e a vencer.`),
+          : (restObras
+            ? `Faltam ${restObras} empreendimento(s) na conferência de vencido e a vencer.`
+            : `Faltam ${saldoLeft} cliente(s) ainda sem saldo.`)),
       log: log.slice(0, 30)
     });
   } catch (error) {

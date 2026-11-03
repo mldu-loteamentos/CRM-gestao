@@ -986,8 +986,8 @@ const EstoqueComercialApp = {
     const tick = async () => {
       n += 1;
       if (n > 200 || (this.state.batimentoDate === today && this.state.batimentoDone)) {
-        if (this.state.batimentoDone) this.setProgress("");
-        else if (!this.state._confGeralRunning) this.setProgress("A posição do dia ainda não fechou. Forçar o que falta continua de onde parou.");
+        if (this.state.batimentoDone && !this.contratosSemSaldo()) this.setProgress("");
+        else if (!this.state.batimentoDone && !this.state._confGeralRunning) this.setProgress("A posição do dia ainda não fechou. Forçar o que falta continua de onde parou.");
         this.paintForcarBotao();
         return;
       }
@@ -1007,7 +1007,7 @@ const EstoqueComercialApp = {
           if (window.lucide) window.lucide.createIcons();
         }
         if (fb && fb.batimentoDate === today && fb.batimentoDone) {
-          this.setProgress("");
+          if (!this.contratosSemSaldo()) this.setProgress("");
           this.paintForcarBotao();
           return;
         }
@@ -1392,12 +1392,7 @@ const EstoqueComercialApp = {
       try { await this.loadEnterprises(); } catch (e) {}
     }
     if (!forcar && this.conferenciaGeralDoDiaCompleta()) return;
-    if (forcar && this.faltamConferencia() === 0) {
-      this.setProgress(this.state.batimentoDate === this.todayStr() && this.state.batimentoDone
-        ? "O batimento de hoje já está completo."
-        : "A conferência já tem todos os empreendimentos. A posição do dia segue no servidor.");
-      return;
-    }
+    if (forcar && this.faltamConferencia() === 0) return;
     this.state._confGeralRunning = true;
     this.state.stopSync = false;
     this.setBusy(true);
@@ -1574,8 +1569,11 @@ const EstoqueComercialApp = {
     const hoje = this.todayStr();
     const posicaoAberta = !(this.state.batimentoDate === hoje && this.state.batimentoDone);
     const falta = this.faltamConferencia();
-    btn.style.display = (posicaoAberta || falta > 0) ? "" : "none";
-    btn.textContent = falta > 0 ? `Forçar o que falta (${falta})` : "Forçar o que falta";
+    const sem = this.contratosSemSaldo();
+    btn.style.display = (posicaoAberta || falta > 0 || sem > 0) ? "" : "none";
+    btn.textContent = falta > 0
+      ? `Forçar o que falta (${falta})`
+      : (sem > 0 ? `Forçar o que falta (${sem} sem saldo)` : "Forçar o que falta");
     btn.disabled = !!this._forcarRodando;
   },
 
@@ -1607,11 +1605,11 @@ const EstoqueComercialApp = {
     let ticks = 0;
     this._forcarTimer = setInterval(() => {
       ticks += 1;
-      const fechou = this.state.batimentoDate === today && this.state.batimentoDone;
+      const fechou = this.state.batimentoDate === today && this.state.batimentoDone && !this.contratosSemSaldo();
       if (ticks > 200 || fechou) {
         clearInterval(this._forcarTimer);
         this._forcarTimer = null;
-        if (fechou && !this.state._confGeralRunning) this.setProgress("");
+        if (fechou && !this.state._confGeralRunning && !this._saldoRodando) this.setProgress("");
         this.paintForcarBotao();
         return;
       }
@@ -1621,10 +1619,86 @@ const EstoqueComercialApp = {
     this.acompanharBatimento(today);
     try {
       await this.garantirConferenciaGeral({ forcar: true });
+      if (!this.state.stopSync && this.contratosSemSaldo() > 0) {
+        this.setBusy(true);
+        try {
+          await this.completarSaldoPendente();
+        } finally {
+          this.setBusy(false);
+        }
+      } else if (this.faltamConferencia() === 0 && this.state.batimentoDate === today && this.state.batimentoDone) {
+        this.setProgress("O batimento de hoje já está completo.");
+      }
     } finally {
       this._forcarRodando = false;
       this.paintForcarBotao();
     }
+  },
+
+  contratosSemSaldo() {
+    if (!(this.state.units || []).length) return 0;
+    return this.portfolioOf(this.state.units).semSaldo || 0;
+  },
+
+  /** Contratos ativos cujo saldo nunca foi gravado. A ficha do cliente preenche o número, ou deixa explícito que o Sienge não trouxe parcela. */
+  async completarSaldoPendente() {
+    const pendentes = (this.state.units || []).filter((u) => this.isActiveFinance(u) && this.unitBalance(u) == null);
+    const porContrato = new Map();
+    pendentes.forEach((u) => {
+      const key = this.contractKey(u);
+      const prev = porContrato.get(key);
+      if (!prev || (!prev.customerId && u.customerId)) porContrato.set(key, u);
+    });
+    const porCc = new Map();
+    let semCliente = 0;
+    porContrato.forEach((u) => {
+      if (!u.customerId || !u.enterpriseId) {
+        semCliente += 1;
+        return;
+      }
+      const cc = String(u.enterpriseId);
+      if (!porCc.has(cc)) porCc.set(cc, new Set());
+      porCc.get(cc).add(String(u.customerId));
+    });
+    if (!porCc.size) {
+      this.setProgress(semCliente
+        ? `${semCliente} contrato(s) ativo(s) sem saldo não têm cliente vinculado. O extrato do empreendimento não achou o título.`
+        : "Não há contrato sem saldo para consultar.");
+      return;
+    }
+    const st = this.state.stCache || {};
+    const rb = this.state.rbCache || {};
+    porCc.forEach((ids) => ids.forEach((id) => {
+      delete st[id];
+      delete rb[id];
+    }));
+    this.state.stCache = st;
+    this.state.rbCache = rb;
+    this._saldoRodando = true;
+    const ccs = [...porCc.keys()];
+    try {
+      this.setProgress(`Buscando o saldo de ${this.contratosSemSaldo()} contrato(s) ativo(s) na ficha do cliente…`);
+      for (let i = 0; i < ccs.length; i++) {
+        if (this.state.stopSync) break;
+        await this.applyRelacionamentoBatimento(ccs[i], {
+          custIdsToRefresh: porCc.get(ccs[i]),
+          label: `Saldo pendente ${i + 1}/${ccs.length} (${ccs[i]})`
+        });
+      }
+    } finally {
+      this._saldoRodando = false;
+    }
+    const ainda = this.contratosSemSaldo();
+    if (this.state.stopSync) {
+      this.setProgress(`Consulta interrompida. ${ainda} contrato(s) ativo(s) ainda sem saldo.`);
+      return;
+    }
+    if (ainda > 0) {
+      const extra = semCliente ? ` ${semCliente} deles não têm cliente vinculado.` : "";
+      this.setProgress(`${ainda} contrato(s) ativo(s) seguem sem saldo. A ficha do cliente no Sienge não trouxe parcela em aberto para eles.${extra}`);
+      return;
+    }
+    this.setProgress("O saldo dos contratos que estavam sem valor foi gravado.");
   },
 
   normName(name) {

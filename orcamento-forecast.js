@@ -71,6 +71,26 @@ const OrcamentoForecastApp = {
     this.render();
     const emp = this.state.companyId;
     if (emp) this.carregarNuvem(emp);
+    this.sincronizarBase();
+  },
+
+  /* A V1 é o último Excel enviado na base do orçamento, o mesmo que o DFC mostra. O arquivo embutido só entra se não houver envio. */
+  fonteDfc() {
+    if (typeof OrcamentoDfcApp !== "undefined" && typeof OrcamentoDfcApp.origem === "function") {
+      if (typeof OrcamentoDfcApp.garantir === "function") OrcamentoDfcApp.garantir();
+      return OrcamentoDfcApp.origem();
+    }
+    return window.ORCAMENTO_DFC_2027 || { fileName: "", lines: [], savedAt: 0 };
+  },
+
+  async sincronizarBase() {
+    if (typeof OrcamentoDfcApp === "undefined" || typeof OrcamentoDfcApp.lerOrcamentoNuvem !== "function") return;
+    const token = (Number(OrcamentoDfcApp._bToken) || 0) + 1;
+    OrcamentoDfcApp._bToken = token;
+    try { await OrcamentoDfcApp.lerOrcamentoNuvem(token); } catch (e) {}
+    this._base = null;
+    this._baseMarca = "";
+    if (document.getElementById("orcamento-forecast-root")) this.render();
   },
 
   carregarLocal() {
@@ -139,7 +159,10 @@ const OrcamentoForecastApp = {
   },
 
   base() {
-    if (this._base) return this._base;
+    const src = this.fonteDfc();
+    const linhas = (src && src.lines) || [];
+    const marca = String(src && src.savedAt || 0) + "|" + linhas.length + "|" + String(src && src.fileName || "");
+    if (this._base && this._baseMarca === marca) return this._base;
     const map = new Map();
     const por = (l, origem) => {
       const e = String(l.e || "").replace(/\D/g, "");
@@ -174,11 +197,15 @@ const OrcamentoForecastApp = {
         row.m = meses;
       }
     };
-    const dfc = window.ORCAMENTO_DFC_2027;
-    ((dfc && dfc.lines) || []).forEach((l) => por(l, "dfc"));
-    const rec = window.ORCAMENTO_RECEITA_2027;
-    ((rec && rec.lines) || []).forEach((l) => por(l, "rec"));
+    linhas.forEach((l) => por(l, "dfc"));
+    const enviado = typeof OrcamentoDfcApp !== "undefined" && OrcamentoDfcApp._custom && Array.isArray(OrcamentoDfcApp._custom.lines) && OrcamentoDfcApp._custom.lines.length;
+    if (!enviado) {
+      const rec = window.ORCAMENTO_RECEITA_2027;
+      ((rec && rec.lines) || []).forEach((l) => por(l, "rec"));
+    }
     this._base = map;
+    this._baseMarca = marca;
+    this._baseNome = String(src && src.fileName || "");
     return map;
   },
 
@@ -472,12 +499,17 @@ const OrcamentoForecastApp = {
   render() {
     const root = document.getElementById("orcamento-forecast-root");
     if (!root) return;
-    if (!document.getElementById("ofc-style")) {
-      const st = document.createElement("style");
+    let st = document.getElementById("ofc-style");
+    if (!st) {
+      st = document.createElement("style");
       st.id = "ofc-style";
-      st.textContent = this.css();
       document.head.appendChild(st);
     }
+    st.textContent = this.css();
+    const corpoAntes = document.getElementById("ofc-corpo");
+    const keepTop = corpoAntes ? corpoAntes.scrollTop : 0;
+    const keepLeft = corpoAntes ? corpoAntes.scrollLeft : 0;
+    document.querySelectorAll(".ofc-modal").forEach((n) => n.remove());
     const emp = this.state.companyId;
     const versoes = emp ? this.versoesDaEmpresa() : [1];
     if (versoes.indexOf(this.state.versao) < 0) this.state.versao = versoes[versoes.length - 1];
@@ -496,7 +528,7 @@ const OrcamentoForecastApp = {
     const distOrc = info.lista.reduce((s, c) => s + c.distOrc, 0);
     const distGer = info.lista.reduce((s, c) => s + c.distGer, 0);
     root.innerHTML = `
-      <p class="ofc-lead">A importação é a V1. Esta tela grava o ajuste a partir da V2, de 01/01/2027 em diante, sem subir outra planilha. Enquanto 2027 não começa, a versão é um ajuste do orçamento. No meio do ano ela passa a ser os meses já realizados mais os que ainda vão acontecer, como forecast 2+10 em março.</p>
+      <p class="ofc-lead">A V1 é o último arquivo enviado na base do orçamento${this._baseNome ? " (" + this.esc(this._baseNome) + ")" : ""}. Esta tela grava o ajuste a partir da V2, de 01/01/2027 em diante, sem subir outra planilha. Enquanto 2027 não começa, a versão é um ajuste do orçamento. No meio do ano ela passa a ser os meses já realizados mais os que ainda vão acontecer, como forecast 2+10 em março.</p>
       <div class="ofc-bar">
         ${filtro}
         <label class="ofc-data">De
@@ -542,6 +574,13 @@ const OrcamentoForecastApp = {
         </table>
       </div>` : `<div class="crm-card ofc-vazio">Escolha a empresa para ver os centros de custo que têm orçamento.</div>`}
       ${this.state.ccAberto ? this.modalHtml() : ""}`;
+    const modal = root.querySelector(".ofc-modal");
+    if (modal) document.body.appendChild(modal);
+    const corpo = document.getElementById("ofc-corpo");
+    if (corpo) {
+      corpo.scrollTop = keepTop;
+      corpo.scrollLeft = keepLeft;
+    }
     this.bindFiltro();
     if (window.lucide) lucide.createIcons();
   },
@@ -858,17 +897,17 @@ const OrcamentoForecastApp = {
       .ofc-nota { margin: 0 0 12px; color: #64748b; font-size: 0.78rem; line-height: 1.4; max-width: 980px; }
       .ofc-vazio { padding: 28px; color: #64748b; }
       .ofc-table td.is-right, .ofc-table th.is-right, .ofc-sheet td.is-right, .ofc-sheet th.is-right { text-align: right; }
-      .ofc-modal { position: fixed; inset: 0; background: rgba(15, 23, 42, .45); z-index: 80; display: flex; align-items: center; justify-content: center; padding: 16px; }
-      .ofc-painel { background: #fff; width: min(1500px, 96vw); height: calc(100vh - 32px); max-height: calc(100vh - 32px); border-radius: 12px; display: flex; flex-direction: column; box-shadow: 0 24px 48px rgba(15,23,42,.25); }
-      .ofc-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 14px 16px; border-bottom: 1px solid #e2e8f0; flex: none; }
-      .ofc-head strong { font-size: 1rem; color: #0f172a; }
-      .ofc-corpo { overflow: auto; padding: 12px 16px 18px; flex: 1; min-height: 0; }
+      .ofc-modal { position: fixed; inset: 0; background: rgba(15, 23, 42, .45); z-index: 13000; display: flex; align-items: stretch; justify-content: stretch; padding: 0; }
+      .ofc-painel { background: #fff; width: 100%; height: 100%; max-height: 100%; border-radius: 0; display: flex; flex-direction: column; box-shadow: none; }
+      .ofc-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 14px 18px; border-bottom: 1px solid #e2e8f0; flex: none; background: #fff; }
+      .ofc-head strong { font-size: 1rem; color: #0f172a; min-width: 0; }
+      .ofc-corpo { overflow: auto; padding: 12px 18px 18px; flex: 1; min-height: 0; }
       .ofc-corpo .cc-scroll { max-height: none; overflow: visible; border: 0; }
-      .ofc-sheet { width: max-content; min-width: 100%; table-layout: auto; }
+      .ofc-sheet { width: max-content; min-width: 100%; table-layout: auto; border-collapse: separate; border-spacing: 0; }
       .ofc-sheet td, .ofc-sheet th { white-space: nowrap; overflow: visible; text-overflow: clip; }
-      .ofc-sheet th.ofc-nome, .ofc-sheet td.ofc-nome { position: sticky; left: 0; z-index: 2; min-width: 420px; max-width: 560px; white-space: normal; text-align: left; line-height: 1.35; background: #fff; box-shadow: 1px 0 0 #e2e8f0; }
+      .ofc-sheet th.ofc-nome, .ofc-sheet td.ofc-nome { position: sticky; left: 0; z-index: 2; min-width: 360px; width: 420px; max-width: 480px; white-space: normal; text-align: left; line-height: 1.35; background: #fff; box-shadow: 8px 0 8px -8px rgba(15, 23, 42, .35); }
       .ofc-sheet thead th { position: sticky; top: 0; z-index: 3; background: #105436; color: #fff; }
-      .ofc-sheet thead th.ofc-nome { z-index: 4; background: #105436; }
+      .ofc-sheet thead th.ofc-nome { z-index: 5; left: 0; background: #105436; }
       .ofc-grupo { cursor: pointer; font-weight: 700; }
       .ofc-grupo.ofc-n1 td { background: #0c3d28; color: #fff; }
       .ofc-grupo.ofc-res td { background: #e7f6ee; color: #105436; }
