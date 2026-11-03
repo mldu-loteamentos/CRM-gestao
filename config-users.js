@@ -531,7 +531,8 @@ const ConfigUsersApp = {
       name: "Relacionamento", icon: "users", key: "mod_rel",
       submodules: [
         { name: "Buscar Cliente", key: "sub_rel_busca", actions: [{ id: "buscar_cliente", label: "Buscar Cliente", permBase: "sub_rel_geral_buscar_cliente" }] },
-        { name: "Documentos para assinar", key: "sub_rel_docs", actions: [{ id: "documentos_assinar", label: "Documentos para assinar", permBase: "sub_rel_geral_documentos_assinar" }] }
+        { name: "Documentos para assinar", key: "sub_rel_docs", actions: [{ id: "documentos_assinar", label: "Documentos para assinar", permBase: "sub_rel_geral_documentos_assinar" }] },
+        { name: "Registro", key: "sub_rel_registro", actions: [{ id: "registro", label: "Registro", permBase: "sub_rel_geral_registro" }] }
       ]
     },
     {
