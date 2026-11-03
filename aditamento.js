@@ -1111,6 +1111,7 @@
         let bytes = null;
         try { bytes = pdf && pdf.output ? pdf.output("arraybuffer") : null; } catch (e) { bytes = null; }
         if (window.DocAssinaturaApp && typeof DocAssinaturaApp.registrar === "function") {
+          const plano = typeof DocAssinaturaApp.planoDeParcelas === "function" ? DocAssinaturaApp.planoDeParcelas(ctx.installments) : "";
           DocAssinaturaApp.registrar({
             tipo: "aditamento",
             cliente: nome,
@@ -1118,6 +1119,7 @@
             unidade,
             arquivo: fileName,
             centroId: codEmp,
+            plano,
             bytes
           });
         }

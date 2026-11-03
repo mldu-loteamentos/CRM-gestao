@@ -21,6 +21,38 @@ const RegistroApp = {
       this.state.pronto = true;
     }
     this.render();
+    this.carregarPosicao();
+  },
+
+  /** A posição gravada no Firebase entra nesta aba. Não depende de a tela de estoque ter sido aberta aqui. */
+  async carregarPosicao() {
+    const app = window.EstoqueComercialApp;
+    if (!app) return;
+    if (app.state && Array.isArray(app.state.units) && app.state.units.length) return;
+    this.state.carregandoPos = true;
+    this.render();
+    try {
+      if (typeof app.loadCache === "function") {
+        const local = app.loadCache();
+        if (local && Array.isArray(local.units) && local.units.length) {
+          if (typeof app.applyCache === "function") app.applyCache(local);
+          return;
+        }
+      }
+      if (typeof app.waitFirebase === "function") await app.waitFirebase(8000);
+      if (typeof app.loadFirebase === "function") {
+        const fb = await app.loadFirebase();
+        if (fb && Array.isArray(fb.units) && fb.units.length && typeof app.applyCache === "function") {
+          app.applyCache(fb);
+          if (typeof app.saveCache === "function") app.saveCache();
+        }
+      }
+    } catch (e) {
+      this.state.avisoGravacao = "Não consegui ler a Posição de estoque gravada.";
+    } finally {
+      this.state.carregandoPos = false;
+      this.render();
+    }
   },
 
   lerLocal() {
@@ -467,11 +499,13 @@ const RegistroApp = {
       })
       : "";
     const avisoPos = !linhas.length ? ""
-      : (!pos.units.length
+      : (this.state.carregandoPos
+        ? `<p style="margin:0 0 12px;padding:10px 12px;border-radius:8px;background:#f8fafc;color:#334155;font-size:0.85rem;">Lendo a Posição de estoque gravada…</p>`
+        : (!pos.units.length
         ? `<p style="margin:0 0 12px;padding:10px 12px;border-radius:8px;background:#fff7ed;color:#9a3412;font-size:0.85rem;">O cadastro foi lido, mas a Posição de estoque ainda não está neste navegador. Abra Posição de estoque e conclua o batimento para contar os quitados de 2025 e 2026.</p>`
         : (cruz.semData
           ? `<p style="margin:0 0 12px;padding:10px 12px;border-radius:8px;background:#fff7ed;color:#9a3412;font-size:0.85rem;">${this.n(cruz.semData)} lote(s) quitado(s) na Posição de estoque estão sem data de quitação e ficam de fora de 2025 e 2026. O batimento precisa gravar essa data.</p>`
-          : ""));
+          : "")));
     const corpo = !linhas.length
       ? `<p style="color:#64748b;padding:8px 0 0;">Nenhum arquivo enviado.</p>`
       : (!pos.units.length ? "" : `

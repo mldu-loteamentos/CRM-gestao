@@ -3122,11 +3122,14 @@ const CessaoPopup = {
     if (!window.DocAssinaturaApp || typeof DocAssinaturaApp.registrar !== "function") return;
     const st = CessaoPopupState;
     const ces = (st.cessionarios && st.cessionarios[0] && st.cessionarios[0].customer) || {};
+    const titular = st.customer || {};
     const unidade = [st.unit && st.unit.costCenterId, st.quadraLote].filter((x) => x && x !== "—").join(" - ");
     const cc = String((st.unit && st.unit.costCenterId) || (st.contract && st.contract.enterpriseId) || "").replace(/\D/g, "");
     DocAssinaturaApp.registrar({
       tipo: "cessao",
-      cliente: ces.name || (st.customer && st.customer.name) || "",
+      cliente: ces.name || titular.name || "",
+      titularId: titular.id || titular.customerId || (st.ctx && st.ctx.customerId) || "",
+      titularNome: titular.name || (st.ctx && st.ctx.nome) || "",
       titulo: st.titulo || "",
       unidade,
       arquivo: arquivo || "",

@@ -13,7 +13,8 @@ const {
   planBatimentoWork,
   stampInadimplenteFromFila,
   filaOverdueForUnit,
-  needsCensus
+  needsCensus,
+  aplicarExtratoObra
 } = require("../../lib/estoque-batimento-core");
 
 const SIENGE_DOMAIN = "mouraleite";
@@ -21,6 +22,7 @@ const SIENGE_USER = "mouraleite-contas-a-pagar";
 const SIENGE_PASS = "U2riBlrXuOPIpbb7TyRapoxSzaXWUisj";
 const SIENGE_AUTH = "Basic " + Buffer.from(`${SIENGE_USER}:${SIENGE_PASS}`).toString("base64");
 const SIENGE_API_BASE = `https://api.sienge.com.br/${SIENGE_DOMAIN}/public/api/v1`;
+const SIENGE_BULK_BASE = `https://api.sienge.com.br/${SIENGE_DOMAIN}/public/api`;
 
 const firebaseConfig = {
   apiKey: "AIzaSyBlBCaXn4y3sJDENW0GXw3ck_D2h3qknHc",
@@ -39,8 +41,8 @@ const STATE_ID = "_batimento_state";
 const FB_CHUNK = 400;
 /** Firestore recusa documento acima de 1 MiB. */
 const FB_DOC_BYTES = 650000;
-/** maxDuration é 60s: sobra tempo para ler e gravar o estoque no Firebase. */
-const BUDGET_MS = 30000;
+/** maxDuration é 60s. O restante fica para gravar e chamar a passagem seguinte. */
+const BUDGET_MS = 40000;
 const CONCURRENCY = 3;
 
 /** Só pausa se BATIMENTO_PAUSED=1. O censo/diário já evita varredura cega. */
@@ -298,6 +300,29 @@ function applyContractInfo(u, info) {
   };
 }
 
+async function fetchExtratoCc(ccId, start, end, depth) {
+  const url = `${SIENGE_BULK_BASE}/bulk-data/v1/customer-extract-history?startDueDate=${start}&endDueDate=${end}&costCenterId=${encodeURIComponent(ccId)}`
+    + "&documentsId=CT&includeRemadeInstallments=false&includeCanceledInstallments=false&includeRevokedInstallments=false&includeRenegotiatedDischarge=false";
+  try {
+    return extractRows(await siengeFetch(url, 3));
+  } catch (e) {
+    const msg = String((e && e.message) || e);
+    const sy = Number(String(start).slice(0, 4));
+    const ey = Number(String(end).slice(0, 4));
+    if (!/507/.test(msg) || depth > 6 || !(ey - sy >= 1)) throw e;
+    const mid = Math.floor((sy + ey) / 2);
+    const left = await fetchExtratoCc(ccId, start, mid + "-12-31", depth + 1);
+    const right = await fetchExtratoCc(ccId, (mid + 1) + "-01-01", end, depth + 1);
+    return left.concat(right);
+  }
+}
+
+async function extratoDaObra(ccId) {
+  const ano = Number(todayIsoSP().slice(0, 4));
+  const fim = (ano + 15) + "-12-31";
+  return fetchExtratoCc(ccId, "1996-01-01", fim, 0);
+}
+
 function originFromReq(req) {
   if (process.env.WARMUP_BASE_URL) return String(process.env.WARMUP_BASE_URL).replace(/\/$/, "");
   if (process.env.VERCEL_URL) return `https://${process.env.VERCEL_URL}`;
@@ -306,14 +331,17 @@ function originFromReq(req) {
   return `${proto}://${host}`;
 }
 
-function continuarBatimento(req) {
+async function continuarBatimento(req) {
   const ctrl = new AbortController();
-  const timer = setTimeout(() => ctrl.abort(), 2500);
+  const timer = setTimeout(() => ctrl.abort(), 12000);
   const secret = process.env.CRON_SECRET || process.env.WARMUP_SECRET || "";
-  fetch(`${originFromReq(req)}/api/estoque-batimento?cont=1`, {
-    headers: secret ? { Authorization: `Bearer ${secret}` } : {},
-    signal: ctrl.signal
-  }).catch(() => {}).finally(() => clearTimeout(timer));
+  try {
+    await fetch(`${originFromReq(req)}/api/estoque-batimento?cont=1`, {
+      headers: secret ? { Authorization: `Bearer ${secret}` } : {},
+      signal: ctrl.signal
+    });
+  } catch (e) {}
+  clearTimeout(timer);
 }
 
 function segueSozinho(req) {
@@ -476,8 +504,8 @@ async function handler(req, res) {
       const contractsLeft = pendingCc.filter((id) => !seenCc.has(id)).length;
       state.contractsLeft = contractsLeft;
       await setDoc(doc(db, FB_COL, STATE_ID), { ...state, done: false });
-      if (contractsLeft > 0 && state.passes < 800) {
-        if (segueSozinho(req)) continuarBatimento(req);
+        if (contractsLeft > 0 && state.passes < 800) {
+        if (segueSozinho(req)) await continuarBatimento(req);
         return res.status(200).json({
           done: false,
           phase: "contratos",
@@ -497,14 +525,13 @@ async function handler(req, res) {
     const sortIds = (ids) => ids.map(String).filter((id) => !seen.has(id))
       .sort((a, b) => Number(a) - Number(b) || a.localeCompare(b));
     const censusQueue = sortIds(plan.censusIds);
-    const queue = censusQueue.length ? censusQueue : sortIds(plan.fichaIds);
     const mode = censusQueue.length ? "census" : "daily";
     state.mode = mode;
 
     const byId = new Map(units.map((u) => [String(u.id), u]));
     const dirtyCc = new Set();
     let stamped = 0;
-    plan.stampUnitIds.forEach((id) => {
+    if (mode === "census") plan.stampUnitIds.forEach((id) => {
       const u = byId.get(String(id));
       if (!u) return;
       const ov = filaOverdueForUnit(u, plan.filaIdx);
@@ -560,48 +587,85 @@ async function handler(req, res) {
     let i = 0;
     let processed = Number(state.processed) || 0;
     let failed = Number(state.failed) || 0;
-    while (i < queue.length && Date.now() - started < BUDGET_MS) {
-      const batch = queue.slice(i, i + CONCURRENCY);
-      i += batch.length;
-      const results = await Promise.allSettled(batch.map((cid) => fetchCustomer(cid)));
-      results.forEach((r, k) => {
-        seen.add(String(batch[k]));
-        if (r.status === "fulfilled") processed += 1;
-        else {
+    let obrasFeitas = 0;
+    const obrasAtivas = [...new Set(units
+      .filter((u) => isFinanceUnit(u) && !isSettledUnit(u))
+      .map((u) => String(u.enterpriseId || ""))
+      .filter(Boolean))].sort((a, b) => Number(a) - Number(b));
+    if (!Array.isArray(state.obrasVistas)) state.obrasVistas = [];
+    const obrasVistas = new Set(state.obrasVistas.map(String));
+
+    if (censusQueue.length) {
+      while (i < censusQueue.length && Date.now() - started < BUDGET_MS) {
+        const batch = censusQueue.slice(i, i + CONCURRENCY);
+        i += batch.length;
+        const results = await Promise.allSettled(batch.map((cid) => fetchCustomer(cid)));
+        results.forEach((r, k) => {
+          seen.add(String(batch[k]));
+          if (r.status === "fulfilled") processed += 1;
+          else {
+            failed += 1;
+            log.push(`cliente ${batch[k]}: ${(r.reason && r.reason.message) || r.reason}`);
+          }
+        });
+      }
+    } else {
+      const pendentes = obrasAtivas.filter((id) => !obrasVistas.has(id));
+      for (const ccId of pendentes) {
+        if (Date.now() - started >= BUDGET_MS) break;
+        try {
+          const rows = await extratoDaObra(ccId);
+          const aplicado = aplicarExtratoObra([...byId.values()], rows, ccId);
+          aplicado.units.forEach((u) => {
+            if (u && u.id != null) byId.set(String(u.id), u);
+          });
+          dirtyCc.add(String(ccId));
+          obrasVistas.add(String(ccId));
+          obrasFeitas += 1;
+          processed += aplicado.atualizadas;
+          log.push(`obra ${ccId}: ${aplicado.atualizadas} contratos, ${aplicado.semExtrato} sem título no extrato`);
+        } catch (e) {
           failed += 1;
-          log.push(`cliente ${batch[k]}: ${(r.reason && r.reason.message) || r.reason}`);
+          log.push(`obra ${ccId}: ${(e && e.message) || e}`);
+          break;
         }
-      });
+      }
     }
+
     state.seen = [...seen];
+    state.obrasVistas = [...obrasVistas];
     state.processed = processed;
     state.failed = failed;
     const restCensus = plan.censusIds.map(String).filter((id) => !seen.has(id)).length;
-    const restFicha = plan.fichaIds.map(String).filter((id) => !seen.has(id)).length;
+    const restObras = obrasAtivas.filter((id) => !obrasVistas.has(id)).length;
     state.censusLeft = restCensus;
-    state.fichaLeft = restFicha;
-    state.done = restCensus === 0 && restFicha === 0;
+    state.fichaLeft = restObras;
+    state.obrasLeft = restObras;
+    state.done = restCensus === 0 && restObras === 0;
     const nextUnits = [...byId.values()];
     const n = await persistSnapshot(nextUnits, state.done);
 
-    if (!state.done && state.passes < 800 && segueSozinho(req)) continuarBatimento(req);
+    if (!state.done && state.passes < 800 && segueSozinho(req)) await continuarBatimento(req);
     return res.status(200).json({
       done: !!state.done,
       date: today,
       mode,
       pass: state.passes,
-      processedThisPass: i,
+      processedThisPass: censusQueue.length ? i : obrasFeitas,
       processed,
       failed,
       skippedSettled: settledN,
       stamped,
       censusLeft: restCensus,
-      fichaLeft: restFicha,
+      fichaLeft: restObras,
+      obrasLeft: restObras,
       dirtyCc: dirtyCc.size,
       caixaPosicao: n,
       message: state.done
-        ? "Batimento do dia concluído. Quitados ficam de fora das próximas consultas."
-        : `Faltam ${restCensus} cliente(s) no censo e ${restFicha} na ficha diária.`,
+        ? "Batimento do dia concluído. Contratos ativos conferidos pelo extrato do empreendimento."
+        : (restCensus
+          ? `Faltam ${restCensus} cliente(s) no censo.`
+          : `Faltam ${restObras} empreendimento(s) na conferência de vencido e a vencer.`),
       log: log.slice(0, 30)
     });
   } catch (error) {

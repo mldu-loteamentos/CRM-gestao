@@ -91,6 +91,9 @@ const DocAssinaturaApp = {
       arquivo: String((dados && dados.arquivo) || "").trim(),
       centroId: String((dados && dados.centroId) || "").replace(/\D/g, ""),
       centroNome: String((dados && dados.centroNome) || "").trim(),
+      titularId: String((dados && dados.titularId) || "").replace(/\D/g, ""),
+      titularNome: String((dados && dados.titularNome) || "").trim(),
+      plano: String((dados && dados.plano) || ""),
       pdfUrl: "",
       userId: eu.userId,
       userName: eu.userName,
@@ -119,6 +122,9 @@ const DocAssinaturaApp = {
         arquivo: row.arquivo,
         centroId: row.centroId,
         centroNome: row.centroNome,
+        titularId: row.titularId,
+        titularNome: row.titularNome,
+        plano: row.plano,
         pdfUrl: "",
         userId: row.userId,
         userName: row.userName,
@@ -385,6 +391,145 @@ const DocAssinaturaApp = {
     return achou;
   },
 
+  normNome(s) {
+    return String(s || "")
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .replace(/[^A-Za-z0-9 ]/g, " ")
+      .replace(/\s+/g, " ")
+      .trim()
+      .toUpperCase();
+  },
+
+  mesmoNome(a, b) {
+    const x = this.normNome(a);
+    const y = this.normNome(b);
+    if (!x || !y || x === "—" || y === "—") return false;
+    if (x === y) return true;
+    const curto = x.length <= y.length ? x : y;
+    const longo = x.length <= y.length ? y : x;
+    return curto.length >= 8 && longo.indexOf(curto) === 0;
+  },
+
+  /** Titular gravado na geração deixou de ser o cliente do título. Sem esse id, compara o nome da linha. */
+  cessaoMudou(row, atual) {
+    if (!row || !atual || !atual.id) return false;
+    const salvo = String(row.titularId || "").replace(/\D/g, "");
+    const agora = String(atual.id || "").replace(/\D/g, "");
+    if (salvo) return salvo !== agora;
+    if (!atual.nome) return false;
+    return !this.mesmoNome(row.cliente, atual.nome);
+  },
+
+  planoDeParcelas(lista) {
+    return (lista || []).map((p) => {
+      if (!p) return "";
+      const id = String(p.installmentId != null ? p.installmentId : (p.installmentNumber != null ? p.installmentNumber : ""));
+      const due = String(p.dueDate || p.originalDueDate || "").slice(0, 10);
+      const valor = Number(p.originalValue != null ? p.originalValue : (p.originalAmount != null ? p.originalAmount : (p.amount || 0))) || 0;
+      return [id, due, valor.toFixed(2)].join(":");
+    }).filter(Boolean).sort().join("|");
+  },
+
+  datasRemade(lista) {
+    const keys = ["remadeDate", "calculationDate", "date", "generatedDate", "negotiationDate", "generationDate", "createdAt", "registerDate"];
+    const out = [];
+    (lista || []).forEach((item) => {
+      if (!item || typeof item !== "object") return;
+      for (let i = 0; i < keys.length; i++) {
+        const d = String(item[keys[i]] || "").slice(0, 10);
+        if (/^\d{4}-\d{2}-\d{2}$/.test(d)) {
+          out.push(d);
+          break;
+        }
+      }
+    });
+    return out;
+  },
+
+  datasGeracaoParcelas(lista) {
+    const keys = ["generationDate", "generatedDate", "remadeDate", "remadeInstallmentsDate", "createdDate"];
+    const out = [];
+    (lista || []).forEach((p) => {
+      if (!p) return;
+      keys.forEach((k) => {
+        const d = String(p[k] || "").slice(0, 10);
+        if (/^\d{4}-\d{2}-\d{2}$/.test(d)) out.push(d);
+      });
+    });
+    return out;
+  },
+
+  /** Reparcelamento no dia do documento ou depois, ou plano de parcelas diferente do gravado. */
+  aditamentoMudou(row, datas, planoAtual) {
+    const dia = String((row && row.createdAt) || "").slice(0, 10);
+    if (/^\d{4}-\d{2}-\d{2}$/.test(dia) && (datas || []).some((d) => String(d).slice(0, 10) >= dia)) return true;
+    const salvo = String((row && row.plano) || "");
+    const atual = String(planoAtual || "");
+    return !!(salvo && atual && salvo !== atual);
+  },
+
+  async siengeGet(path) {
+    if (typeof window.siengeFetchWithRetry !== "function") return null;
+    try {
+      return await window.siengeFetchWithRetry(path, 1);
+    } catch (e) {
+      return null;
+    }
+  },
+
+  listaSienge(res) {
+    if (Array.isArray(res)) return res;
+    return (res && (res.results || res.data)) || [];
+  },
+
+  async titularAtual(billId) {
+    this._titularBill = this._titularBill || {};
+    if (Object.prototype.hasOwnProperty.call(this._titularBill, billId)) return this._titularBill[billId];
+    const bill = await this.siengeGet("/accounts-receivable/receivable-bills/" + encodeURIComponent(billId));
+    if (!bill || typeof bill !== "object") {
+      this._titularBill[billId] = null;
+      return null;
+    }
+    const pessoa = bill.customer || bill.client || {};
+    const id = String(bill.customerId || bill.clientId || pessoa.id || pessoa.customerId || pessoa.clientId || "").replace(/\D/g, "");
+    let nome = String(bill.clientName || bill.customerName || pessoa.name || pessoa.clientName || "").trim();
+    if (!nome && id) {
+      const cli = await this.siengeGet("/customers/" + encodeURIComponent(id));
+      nome = String((cli && (cli.name || cli.clientName)) || "").trim();
+    }
+    const atual = id ? { id: id, nome: nome } : null;
+    this._titularBill[billId] = atual;
+    return atual;
+  },
+
+  async cessaoLancadaNoSienge(row) {
+    if (!row || row.tipo !== "cessao") return false;
+    const billId = String(row.titulo || "").replace(/\D/g, "");
+    if (!billId) return false;
+    const atual = await this.titularAtual(billId);
+    return this.cessaoMudou(row, atual);
+  },
+
+  async aditamentoLancadoNoSienge(row) {
+    if (!row || row.tipo !== "aditamento") return false;
+    const billId = String(row.titulo || "").replace(/\D/g, "");
+    if (!billId) return false;
+    const remade = await this.siengeGet("/remade-installments?billReceivableId=" + encodeURIComponent(billId));
+    const datas = this.datasRemade(this.listaSienge(remade));
+    let planoAtual = "";
+    let datasParcela = [];
+    if (row.plano || !datas.length) {
+      const res = await this.siengeGet("/accounts-receivable/receivable-bills/" + encodeURIComponent(billId) + "/installments?limit=200");
+      const inst = this.listaSienge(res);
+      if (inst.length) {
+        planoAtual = this.planoDeParcelas(inst);
+        datasParcela = this.datasGeracaoParcelas(inst);
+      }
+    }
+    return this.aditamentoMudou(row, datas.concat(datasParcela), planoAtual);
+  },
+
   async marcarLancado(row) {
     if (!row || row.status === "lancado") return;
     row.status = "lancado";
@@ -400,15 +545,24 @@ const DocAssinaturaApp = {
 
   async reconciliarDistratos() {
     if (this._reconciliando) return this._reconciliando;
-    const pendentes = (this.itens || []).filter((r) => r && r.tipo === "distrato" && r.status !== "lancado");
+    const pendentes = (this.itens || []).filter((r) => r && r.status !== "lancado" && (r.tipo === "distrato" || r.tipo === "cessao" || r.tipo === "aditamento"));
     this._reconciliando = (async () => {
       for (let i = 0; i < pendentes.length; i++) {
+        const row = pendentes[i];
         let gravado = false;
-        try { gravado = await this.tituloBaixadoNoSienge(pendentes[i]); } catch (e) { gravado = false; }
-        if (!gravado) {
-          try { gravado = await this.temDistratoGravado(pendentes[i]); } catch (e) { gravado = false; }
+        try {
+          if (row.tipo === "distrato") {
+            gravado = await this.tituloBaixadoNoSienge(row);
+            if (!gravado) gravado = await this.temDistratoGravado(row);
+          } else if (row.tipo === "cessao") {
+            gravado = await this.cessaoLancadaNoSienge(row);
+          } else if (row.tipo === "aditamento") {
+            gravado = await this.aditamentoLancadoNoSienge(row);
+          }
+        } catch (e) {
+          gravado = false;
         }
-        if (gravado) await this.marcarLancado(pendentes[i]);
+        if (gravado) await this.marcarLancado(row);
       }
       if (document.getElementById("docs-ass-body")) this.pintar();
     })();
