@@ -204,9 +204,22 @@ const OrcamentoForecastApp = {
   versoesDaEmpresa() {
     const pack = this.pacote(this.state.companyId, false);
     const nums = pack ? Object.keys(pack.versoes || {}).map(Number).filter((n) => n > 1) : [];
-    if (!nums.length) nums.push(2);
     nums.sort((a, b) => a - b);
     return [1].concat(nums);
+  },
+
+  /* Sem edição de entrada, custo ou despesa, o imposto importado permanece. Recalcular sem mudança faz a versão divergir da V1. */
+  versaoMudouBase(emp, versao) {
+    if (Number(versao) <= 1) return false;
+    const doc = this.docVersao(versao, false);
+    const edits = (doc && doc.edits) || {};
+    return this.linhasEmpresa(emp).some((l) => {
+      if (this.ehImposto(l.conta, l.nome) || this.ehDistribuicao(l.conta, l.nome)) return false;
+      const ed = edits[this.chave(l)];
+      if (!ed) return false;
+      const base = l.m || [];
+      return ed.some((v, i) => Math.abs(this.num(v) - this.num(base[i])) > 0.004);
+    });
   },
 
   docVersao(n, criar) {
@@ -345,8 +358,9 @@ const OrcamentoForecastApp = {
     return -abs;
   },
 
-  /* Resultado do mês sem a distribuição lançada e com o imposto recalculado. */
+  /* Resultado do mês sem a distribuição lançada. O imposto só é trocado pelo cálculo quando a versão alterou a base. */
   resultadoEmpresa(emp, versao) {
+    const mudou = this.versaoMudouBase(emp, versao);
     const linhas = this.linhasEmpresa(emp).map((l) => ({
       e: l.e,
       cc: l.cc,
@@ -357,19 +371,23 @@ const OrcamentoForecastApp = {
       m: this.mesesDe(versao, l)
     }));
     let imposto = null;
-    if (typeof OrcamentoImpostosApp !== "undefined" && typeof OrcamentoImpostosApp.calcular === "function") {
+    if (mudou && typeof OrcamentoImpostosApp !== "undefined" && typeof OrcamentoImpostosApp.calcular === "function") {
       try { imposto = (OrcamentoImpostosApp.calcular(linhas) || {})[String(emp)] || null; } catch (e) { imposto = null; }
     }
     this._imposto = imposto;
+    this._impostoAtivo = mudou;
     const pagar = (imposto && imposto.pagar) || { pis: this.z(), cofins: this.z(), irpj: this.z(), csll: this.z() };
     const meses = this.z();
     linhas.forEach((l) => {
-      if (this.ehDistribuicao(l.conta, l.cn) || this.ehImposto(l.conta, l.cn)) return;
+      if (this.ehDistribuicao(l.conta, l.cn)) return;
+      if (mudou && this.ehImposto(l.conta, l.cn)) return;
       const gid = this.grupoDe(l.conta, l.cn);
       l.m.forEach((v, i) => { meses[i] += this.sinal(gid, l.conta, l.cn, v); });
     });
-    for (let i = 0; i < 12; i++) {
-      meses[i] -= this.num(pagar.pis[i]) + this.num(pagar.cofins[i]) + this.num(pagar.irpj[i]) + this.num(pagar.csll[i]);
+    if (mudou) {
+      for (let i = 0; i < 12; i++) {
+        meses[i] -= this.num(pagar.pis[i]) + this.num(pagar.cofins[i]) + this.num(pagar.irpj[i]) + this.num(pagar.csll[i]);
+      }
     }
     return { meses: meses, pagar: pagar };
   },
@@ -401,6 +419,7 @@ const OrcamentoForecastApp = {
     const emp = this.state.companyId;
     if (!emp) return [];
     const dist = this.distribuicaoPorCentro(emp, this.state.versao);
+    const mudou = !!this._impostoAtivo;
     const map = new Map();
     this.linhasEmpresa(emp).forEach((l) => {
       let row = map.get(l.cc);
@@ -411,7 +430,7 @@ const OrcamentoForecastApp = {
       if (!row.nome && l.ccNome) row.nome = l.ccNome;
       row.contas += 1;
       const v1 = l.m || this.z();
-      const agora = this.ehImposto(l.conta, l.nome) ? this.impostoMeses(l) : this.mesesDe(this.state.versao, l);
+      const agora = (mudou && this.ehImposto(l.conta, l.nome)) ? this.impostoMeses(l) : this.mesesDe(this.state.versao, l);
       if (this.ehDistribuicao(l.conta, l.nome)) {
         row.distOrc += this.somaPeriodo(v1.map((v) => Math.abs(this.num(v))));
       } else {
@@ -460,7 +479,8 @@ const OrcamentoForecastApp = {
       document.head.appendChild(st);
     }
     const emp = this.state.companyId;
-    const versoes = emp ? this.versoesDaEmpresa() : [1, 2];
+    const versoes = emp ? this.versoesDaEmpresa() : [1];
+    if (versoes.indexOf(this.state.versao) < 0) this.state.versao = versoes[versoes.length - 1];
     const info = emp ? this.centrosDaEmpresa() : { lista: [], dist: null };
     const filtro = window.MlEmpresaFilter ? MlEmpresaFilter.html({
       id: "ofc-emp",
@@ -487,7 +507,8 @@ const OrcamentoForecastApp = {
         </label>
         <div class="ofc-versoes">
           ${versoes.map((n) => `<button type="button" class="ofc-ver${n === this.state.versao ? " is-on" : ""}" onclick="OrcamentoForecastApp.setVersao(${n})">${this.esc(this.rotuloVersao(n))}</button>`).join("")}
-          ${emp && this.state.versao > 1 ? `<button type="button" class="btn btn-primary ofc-nova" onclick="OrcamentoForecastApp.novaVersao()">Nova versão</button>` : ""}
+          ${emp ? `<button type="button" class="btn btn-primary ofc-nova" onclick="OrcamentoForecastApp.novaVersao()">Nova versão</button>` : ""}
+          ${emp && this.state.versao > 1 ? `<button type="button" class="ofc-excluir" onclick="OrcamentoForecastApp.excluirVersao()">Excluir versão</button>` : ""}
         </div>
       </div>
       ${emp ? `<div class="ofc-kpis">
@@ -558,7 +579,8 @@ const OrcamentoForecastApp = {
         self.state.qEmp = "";
         self.state.ccAberto = "";
         const pack = self.pacote(self.state.companyId, false);
-        self.state.versao = pack && pack.atual ? Number(pack.atual) : 2;
+        const nums = pack ? Object.keys(pack.versoes || {}).map(Number).filter((n) => n > 1) : [];
+        self.state.versao = nums.length ? (Number(pack.atual) || nums[nums.length - 1]) : 1;
         self._imposto = null;
         self.render();
         if (self.state.companyId) self.carregarNuvem(self.state.companyId);
@@ -607,6 +629,26 @@ const OrcamentoForecastApp = {
     pack.atual = nova;
     pack.savedAt = Date.now();
     this.state.versao = nova;
+    this.persistir();
+    this.render();
+  },
+
+  excluirVersao() {
+    const emp = this.state.companyId;
+    const n = Number(this.state.versao);
+    if (!emp || n <= 1) return;
+    const pack = this.pacote(emp, false);
+    if (!pack || !pack.versoes || !pack.versoes[String(n)]) return;
+    const ok = window.confirm("Excluir a " + this.rotuloVersao(n) + "? O ajuste desta versão sai da tela.");
+    if (!ok) return;
+    delete pack.versoes[String(n)];
+    const rest = Object.keys(pack.versoes).map(Number).filter((x) => x > 1);
+    const menores = rest.filter((x) => x < n);
+    const destino = menores.length ? Math.max.apply(null, menores) : (rest.length ? Math.min.apply(null, rest) : 1);
+    pack.atual = destino;
+    pack.savedAt = Date.now();
+    this.state.versao = destino;
+    this.state.ccAberto = "";
     this.persistir();
     this.render();
   },
@@ -712,7 +754,7 @@ const OrcamentoForecastApp = {
         cur = byId[cur].parentId;
       }
     });
-    const head = `<tr><th>Conta</th>${meses.map((i) => `<th class="is-right">${this.MESES[i]}</th>`).join("")}<th class="is-right">Total</th></tr>`;
+    const head = `<tr><th class="ofc-nome">Conta</th>${meses.map((i) => `<th class="is-right">${this.MESES[i]}</th>`).join("")}<th class="is-right">Total</th></tr>`;
     const linhasHtml = [];
     const geradoVisto = new Set();
     const walk = (parent) => {
@@ -723,7 +765,7 @@ const OrcamentoForecastApp = {
           (contasPorGrupo.get(nodeId) || []).forEach((l) => {
             const vals = this.ehDistribuicao(l.conta, l.nome)
               ? (l.m || this.z())
-              : (this.ehImposto(l.conta, l.nome) ? this.impostoMeses(l) : this.mesesDe(this.state.versao, l));
+              : ((this._impostoAtivo && this.ehImposto(l.conta, l.nome)) ? this.impostoMeses(l) : this.mesesDe(this.state.versao, l));
             const gid = this.grupoDe(l.conta, l.nome);
             vals.forEach((v, i) => { soma[i] += this.sinal(gid, l.conta, l.nome, v); });
           });
@@ -731,7 +773,7 @@ const OrcamentoForecastApp = {
         };
         acumular(g.id);
         const ico = `<i data-lucide="${aberto ? "chevron-down" : "chevron-right"}" style="width:14px;height:14px;"></i>`;
-        linhasHtml.push(`<tr class="ofc-grupo ofc-${g.type === "resultado" ? "res" : "n1"}" onclick="OrcamentoForecastApp.toggleGrupo('${g.id}')"><td>${ico} ${this.esc(g.name)}</td>${meses.map((i) => `<td class="is-right">${this.dinheiro(soma[i])}</td>`).join("")}<td class="is-right">${this.dinheiro(this.somaPeriodo(soma))}</td></tr>`);
+        linhasHtml.push(`<tr class="ofc-grupo ofc-${g.type === "resultado" ? "res" : "n1"}" onclick="OrcamentoForecastApp.toggleGrupo('${g.id}')"><td class="ofc-nome">${ico} ${this.esc(g.name)}</td>${meses.map((i) => `<td class="is-right">${this.dinheiro(soma[i])}</td>`).join("")}<td class="is-right">${this.dinheiro(this.somaPeriodo(soma))}</td></tr>`);
         if (!aberto) return;
         walk(g.id);
         (contasPorGrupo.get(g.id) || []).forEach((l) => linhasHtml.push(this.contaHtml(l, meses, dist, geradoVisto)));
@@ -767,28 +809,32 @@ const OrcamentoForecastApp = {
   contaHtml(l, meses, dist, geradoVisto) {
     const distLinha = this.ehDistribuicao(l.conta, l.nome);
     const imposto = this.ehImposto(l.conta, l.nome);
-    const vals = imposto ? this.impostoMeses(l) : (distLinha ? (l.m || this.z()) : this.mesesDe(this.state.versao, l));
+    const recalculado = imposto && !!this._impostoAtivo;
+    const vals = recalculado ? this.impostoMeses(l) : (distLinha ? (l.m || this.z()) : this.mesesDe(this.state.versao, l));
     const cls = imposto ? "ofc-imposto" : (distLinha ? "ofc-dist" : "ofc-conta");
-    const tag = imposto ? " · recalculado" : (distLinha ? " · orçado na importação" : "");
-    let html = `<tr class="${cls}"><td>${this.esc(l.conta + " " + l.nome)}${tag}</td>${meses.map((i) => {
+    const tag = recalculado ? " · recalculado" : (distLinha ? " · orçado na importação" : "");
+    const nomeConta = this.esc(l.conta + " " + l.nome) + tag;
+    const fatiaAberta = !!this.state.abertos["conta:" + l.conta + ":" + l.cc];
+    const abre = (!distLinha && !imposto && this.ehReceitaPartida(l.conta, l.nome))
+      ? `<button type="button" class="ofc-abre" title="Abrir carteira, vendas, antecipação e serviço" onclick="OrcamentoForecastApp.toggleGrupo('conta:${l.conta}:${l.cc}')"><i data-lucide="${fatiaAberta ? "chevron-down" : "chevron-right"}" style="width:14px;height:14px;"></i></button> `
+      : "";
+    let html = `<tr class="${cls}"><td class="ofc-nome" title="${this.esc(l.conta + " " + l.nome)}">${abre}${nomeConta}</td>${meses.map((i) => {
       if (imposto || distLinha || !this.mesEditavel(i)) return `<td class="is-right ofc-lock">${this.dinheiro(vals[i])}</td>`;
       return `<td class="is-right"><input class="ofc-inp" inputmode="decimal" value="${this.esc(this.dinheiro(vals[i]))}" onchange="OrcamentoForecastApp.gravarMes('${l.cc}','${l.conta}',${i},this.value)"></td>`;
     }).join("")}<td class="is-right">${this.dinheiro(this.somaPeriodo(vals))}</td></tr>`;
     if (distLinha && geradoVisto && !geradoVisto.has(l.cc)) {
       geradoVisto.add(l.cc);
       const ger = dist.gerado.get(l.cc) || this.z();
-      html += `<tr class="ofc-gerado"><td>Gerado nesta versão</td>${meses.map((i) => `<td class="is-right">${this.dinheiro(ger[i])}</td>`).join("")}<td class="is-right">${this.dinheiro(this.somaPeriodo(ger))}</td></tr>`;
+      html += `<tr class="ofc-gerado"><td class="ofc-nome">Gerado nesta versão</td>${meses.map((i) => `<td class="is-right">${this.dinheiro(ger[i])}</td>`).join("")}<td class="is-right">${this.dinheiro(this.somaPeriodo(ger))}</td></tr>`;
     }
-    if (!distLinha && !imposto && this.ehReceitaPartida(l.conta, l.nome) && this.state.abertos["conta:" + l.conta + ":" + l.cc]) {
+    if (!distLinha && !imposto && this.ehReceitaPartida(l.conta, l.nome) && fatiaAberta) {
       const f = this.fatiasDe(this.state.versao, l);
       [["cart", "Carteira"], ["vend", "Novas vendas"], ["ant", "Antecipação"], ["serv", "Serviço"]].forEach((par) => {
-        html += `<tr class="ofc-fatia"><td>${par[1]}</td>${meses.map((i) => {
+        html += `<tr class="ofc-fatia"><td class="ofc-nome">${par[1]}</td>${meses.map((i) => {
           if (!this.mesEditavel(i)) return `<td class="is-right ofc-lock">${this.dinheiro(f[par[0]][i])}</td>`;
           return `<td class="is-right"><input class="ofc-inp" inputmode="decimal" value="${this.esc(this.dinheiro(f[par[0]][i]))}" onchange="OrcamentoForecastApp.gravarFatia('${l.cc}','${l.conta}','${par[0]}',${i},this.value)"></td>`;
         }).join("")}<td class="is-right">${this.dinheiro(this.somaPeriodo(f[par[0]]))}</td></tr>`;
       });
-    } else if (!distLinha && !imposto && this.ehReceitaPartida(l.conta, l.nome)) {
-      html = html.replace(`<tr class="${cls}"><td>`, `<tr class="${cls}"><td><button type="button" class="ofc-abre" title="Abrir carteira, vendas, antecipação e serviço" onclick="OrcamentoForecastApp.toggleGrupo('conta:${l.conta}:${l.cc}')"><i data-lucide="chevron-right" style="width:14px;height:14px;"></i></button> `);
     }
     return html;
   },
@@ -803,6 +849,8 @@ const OrcamentoForecastApp = {
       .ofc-ver { border: 1px solid #cbd5e1; background: #fff; color: #334155; border-radius: 999px; padding: 6px 12px; font-size: 0.78rem; cursor: pointer; }
       .ofc-ver.is-on { background: #105436; color: #fff; border-color: #105436; }
       .ofc-nova { height: 36px; }
+      .ofc-excluir { height: 36px; border: 1px solid #b91c1c; background: #fff; color: #b91c1c; border-radius: 8px; padding: 0 12px; font-size: 0.78rem; font-weight: 700; cursor: pointer; }
+      .ofc-excluir:hover { background: #fef2f2; }
       .ofc-kpis { display: flex; flex-wrap: wrap; gap: 10px; margin-bottom: 8px; }
       .ofc-kpis div { background: #fff; border: 1px solid #e2e8f0; border-top: 3px solid #105436; border-radius: 10px; padding: 8px 12px; min-width: 180px; }
       .ofc-kpis span { display: block; font-size: 0.72rem; color: #64748b; font-weight: 700; }
@@ -810,13 +858,17 @@ const OrcamentoForecastApp = {
       .ofc-nota { margin: 0 0 12px; color: #64748b; font-size: 0.78rem; line-height: 1.4; max-width: 980px; }
       .ofc-vazio { padding: 28px; color: #64748b; }
       .ofc-table td.is-right, .ofc-table th.is-right, .ofc-sheet td.is-right, .ofc-sheet th.is-right { text-align: right; }
-      .ofc-modal { position: fixed; inset: 0; background: rgba(15, 23, 42, .45); z-index: 80; display: flex; align-items: flex-start; justify-content: center; padding: 32px 16px; }
-      .ofc-painel { background: #fff; width: min(1180px, 100%); max-height: calc(100vh - 64px); border-radius: 12px; display: flex; flex-direction: column; box-shadow: 0 24px 48px rgba(15,23,42,.25); }
-      .ofc-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 14px 16px; border-bottom: 1px solid #e2e8f0; }
+      .ofc-modal { position: fixed; inset: 0; background: rgba(15, 23, 42, .45); z-index: 80; display: flex; align-items: center; justify-content: center; padding: 16px; }
+      .ofc-painel { background: #fff; width: min(1500px, 96vw); height: calc(100vh - 32px); max-height: calc(100vh - 32px); border-radius: 12px; display: flex; flex-direction: column; box-shadow: 0 24px 48px rgba(15,23,42,.25); }
+      .ofc-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 14px 16px; border-bottom: 1px solid #e2e8f0; flex: none; }
       .ofc-head strong { font-size: 1rem; color: #0f172a; }
-      .ofc-corpo { overflow: auto; padding: 12px 16px 18px; }
-      .ofc-sheet { min-width: 860px; }
-      .ofc-sheet td, .ofc-sheet th { white-space: nowrap; }
+      .ofc-corpo { overflow: auto; padding: 12px 16px 18px; flex: 1; min-height: 0; }
+      .ofc-corpo .cc-scroll { max-height: none; overflow: visible; border: 0; }
+      .ofc-sheet { width: max-content; min-width: 100%; table-layout: auto; }
+      .ofc-sheet td, .ofc-sheet th { white-space: nowrap; overflow: visible; text-overflow: clip; }
+      .ofc-sheet th.ofc-nome, .ofc-sheet td.ofc-nome { position: sticky; left: 0; z-index: 2; min-width: 420px; max-width: 560px; white-space: normal; text-align: left; line-height: 1.35; background: #fff; box-shadow: 1px 0 0 #e2e8f0; }
+      .ofc-sheet thead th { position: sticky; top: 0; z-index: 3; background: #105436; color: #fff; }
+      .ofc-sheet thead th.ofc-nome { z-index: 4; background: #105436; }
       .ofc-grupo { cursor: pointer; font-weight: 700; }
       .ofc-grupo.ofc-n1 td { background: #0c3d28; color: #fff; }
       .ofc-grupo.ofc-res td { background: #e7f6ee; color: #105436; }
@@ -824,7 +876,11 @@ const OrcamentoForecastApp = {
       .ofc-lock { color: #64748b; }
       .ofc-imposto td { background: #f8fafc; }
       .ofc-gerado td { background: #ecfdf3; color: #105436; font-weight: 700; }
-      .ofc-inp { width: 92px; height: 28px; border: 1px solid #cbd5e1; border-radius: 6px; text-align: right; padding: 0 6px; font: inherit; font-size: 0.78rem; }
+      .ofc-grupo.ofc-n1 td.ofc-nome { background: #0c3d28; }
+      .ofc-grupo.ofc-res td.ofc-nome { background: #e7f6ee; }
+      .ofc-imposto td.ofc-nome { background: #f8fafc; }
+      .ofc-gerado td.ofc-nome { background: #ecfdf3; }
+      .ofc-inp { width: 112px; height: 32px; border: 1px solid #cbd5e1; border-radius: 6px; text-align: right; padding: 0 8px; font: inherit; font-size: 0.82rem; }
       .ofc-abre { border: 0; background: transparent; padding: 0 4px 0 0; cursor: pointer; color: #105436; vertical-align: middle; }
     `;
   }

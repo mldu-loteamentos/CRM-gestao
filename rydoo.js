@@ -504,7 +504,7 @@ const RydooApp = {
                 <i data-lucide="check-square" style="width:14px;height:14px;"></i> Marcar todos
               </button>
               <button type="button" id="rydoo-btn-gerar" class="btn btn-primary btn-sm rydoo-b" onclick="RydooApp.gerarMarcados()" ${s.rows.length && !s.preparing ? "" : "disabled"}>
-                <i data-lucide="file-plus-2" style="width:14px;height:14px;"></i> Gerar títulos
+                <i data-lucide="file-plus-2" style="width:14px;height:14px;"></i> Gerar e enviar
               </button>
             </div>
           </div>
@@ -658,8 +658,8 @@ const RydooApp = {
       acao = `<button type="button" class="rydoo-titulo" title="Abrir o analítico do título" onclick="event.stopPropagation(); RydooApp.abrirTitulo(decodeURIComponent('${arg}'))">Título ${this.esc(g.billId)}</button>${pago}`;
     } else if (pronto) {
       const off = alertas || g.billBusy ? "disabled" : "";
-      const title = alertas ? "Revise os alertas antes de gerar o título" : "Gerar título REEM no Sienge";
-      acao = `<button type="button" class="btn btn-primary btn-sm" style="height:32px;" title="${this.esc(title)}" ${off} onclick="event.stopPropagation(); RydooApp.gerarTitulo(decodeURIComponent('${arg}'))">Gerar título</button>`;
+      const title = alertas ? "Revise os alertas antes de gerar o título" : "Gerar o título no Sienge e enviar o fechamento por e-mail";
+      acao = `<button type="button" class="btn btn-primary btn-sm" style="height:32px;" title="${this.esc(title)}" ${off} onclick="event.stopPropagation(); RydooApp.gerarTitulo(decodeURIComponent('${arg}'))">Gerar título e enviar e-mail</button>`;
     }
     let filhos = "";
     if (open) {
@@ -715,6 +715,7 @@ const RydooApp = {
       else if (g.bankStatus === "erro") banco = "Não consegui ler os dados bancários.";
       else if (g.bank) banco = this.bancoTexto(g.bank);
       html += `<span class="rydoo-credor">${this.esc(c.id + " — " + c.name)} ${tag} · ${this.esc(banco)}</span>`;
+      if (g.emailError) html += `<span class="rydoo-tag rydoo-tag-divergente" title="${this.esc(g.emailError)}">E-mail não enviado</span>`;
     }
     return html;
   },
@@ -2209,8 +2210,8 @@ const RydooApp = {
         ["Colaboradores", lista.join(", ")],
         ["Valor total", this.money(total)]
       ],
-      aviso: "Os dados bancários de cada credor são enviados logo após a criação do título.",
-      botao: lista.length === 1 ? "Gerar título" : "Gerar títulos"
+      aviso: "Cada título leva os dados bancários e o e-mail do fechamento para o credor, com cópia para o financeiro.",
+      botao: lista.length === 1 ? "Gerar título e enviar e-mail" : "Gerar e enviar"
     });
     if (!ok) return;
     const erros = [];
@@ -2219,7 +2220,10 @@ const RydooApp = {
       this.setJob("Gerando títulos no Sienge · " + pessoa, Math.round((i / lista.length) * 100));
       const res = await this.gerarTitulo(pessoa, { skipConfirm: true, silent: true, bulk: true, bulkIndex: i, bulkTotal: lista.length });
       if (!res || !res.ok) erros.push(pessoa + ": " + ((res && res.error) || "falha"));
-      else if (this.state.picked) delete this.state.picked[pessoa];
+      else {
+        if (this.state.picked) delete this.state.picked[pessoa];
+        if (!res.emailSent) erros.push(pessoa + ": título " + res.billId + " gerado, e-mail não enviado. " + (res.error || ""));
+      }
     }
     this.setJob(erros.length ? ("Geração concluída com " + erros.length + " falha(s).") : ("Títulos gerados no Sienge · " + lista.length + " de " + lista.length), 100);
     this.auditar({
@@ -2310,21 +2314,31 @@ const RydooApp = {
     const comp = this.competencia(rows);
     const docNum = "Reembolso " + (comp || "");
     const obs = "Reembolso Despesas Mensais referente " + this.mesNome(comp);
+    let emails = [];
+    try {
+      emails = await this.emailsDoCredor(g.creditor.id);
+    } catch (e) {
+      return fail("Não consegui ler o e-mail do credor no Sienge.");
+    }
+    if (!emails.length) return fail("O credor não tem e-mail no cadastro do Sienge. Sem o e-mail o título não é gerado.");
     if (!options.skipConfirm) {
       let banco = "Sem conta bancária no cadastro.";
       if (g.bankStatus === "loading") banco = "Lendo dados bancários…";
       else if (g.bank) banco = this.bancoTexto(g.bank);
       const ok = await this.confirmarTitulo({
-        titulo: "Gerar título no Sienge",
+        titulo: "Gerar título e enviar e-mail",
         campos: [
           ["Credor", g.creditor.id + " — " + (g.creditor.name || pessoa)],
+          ["E-mail", emails.join(", ")],
+          ["Cópia", "financeiro@mouraleite.com.br"],
           ["Documento", "REEM · " + docNum],
           ["Observação", obs],
           ["Lançamentos", String(reembolso.length)],
           ["Dados bancários", banco],
           ["Valor", this.money(total), true]
         ],
-        aviso: "Os dados bancários são enviados logo após a criação do título."
+        aviso: "O título é gerado no Sienge e o fechamento segue por e-mail para o credor, com cópia para o financeiro.",
+        botao: "Gerar título e enviar e-mail"
       });
       if (!ok) return { ok: false, error: "cancelado" };
     }
@@ -2405,16 +2419,38 @@ const RydooApp = {
       g.bankBusy = false;
       g.bankSent = bankOk;
       g.bankError = bankOk ? "" : (bankMsg || "Dados bancários não enviados.");
-      step("Anexando PDF do título " + billId + "…", options.bulk ? basePct + 18 : 80);
-      await this.anexarPdf(g, rows, billId);
+      step("Anexando PDF do título " + billId + "…", options.bulk ? basePct + 16 : 70);
+      const fechamento = await this.anexarPdf(g, rows, billId);
       logs.push("PDF anexado.");
-      await this.guardarTitulo(g, billId, docNum, obs, total, { bankSent: bankOk });
+      step("Enviando e-mail do fechamento de " + pessoa + "…", options.bulk ? basePct + 20 : 88);
+      let mailOk = false;
+      let mailMsg = "";
+      try {
+        const envio = await this.enviarEmailReembolso({
+          para: emails,
+          comp: comp,
+          pagamento: this.dataBr(hoje),
+          pdf: fechamento.bytes,
+          nomePdf: fechamento.nome
+        });
+        mailOk = true;
+        logs.push("E-mail enviado para " + emails.join(", ") + ".");
+        if (envio && envio.cc && envio.cc.length) logs.push("Cópia para " + envio.cc.join(", ") + ".");
+      } catch (e) {
+        mailMsg = (e && e.message) ? e.message : "Falha ao enviar o e-mail.";
+        logs.push(mailMsg);
+      }
+      g.emailSent = mailOk;
+      g.emailError = mailOk ? "" : mailMsg;
+      await this.guardarTitulo(g, billId, docNum, obs, total, { bankSent: bankOk, emailSent: mailOk, emailTo: emails.join(", ") });
       g.billBusy = false;
-      if (!options.bulk) this.setJob("Título " + billId + " gerado no Sienge.", 100);
+      if (!options.bulk) this.setJob(mailOk ? ("Título " + billId + " gerado e e-mail enviado.") : ("Título " + billId + " gerado. O e-mail não saiu."), 100);
       this.renderList();
       this.auditar({
-        status: bankOk ? "ok" : "erro",
-        summary: "Título " + billId + " gerado para " + pessoa + (bankOk ? ", com dados bancários." : ". Dados bancários não enviados."),
+        status: (bankOk && mailOk) ? "ok" : "erro",
+        summary: "Título " + billId + " gerado para " + pessoa
+          + (mailOk ? " e e-mail enviado para " + emails.join(", ") : ". O e-mail não foi enviado")
+          + (bankOk ? ", com dados bancários." : ". Dados bancários não enviados."),
         titleId: String(billId),
         customerLabel: (g.creditor && g.creditor.name) || pessoa,
         endpoint: "/bills",
@@ -2425,15 +2461,18 @@ const RydooApp = {
           documentNumber: docNum,
           total: total,
           bankSent: bankOk,
+          emailSent: mailOk,
+          emailTo: emails.join(", "),
           log: logs
         }
       });
       if (!options.silent) {
-        alert(bankOk
-          ? ("Título " + billId + " gerado no Sienge, com dados bancários e PDF.")
-          : ("Título " + billId + " gerado, mas os dados bancários não foram enviados. " + bankMsg));
+        const partes = ["Título " + billId + " gerado no Sienge."];
+        partes.push(mailOk ? "E-mail enviado para " + emails.join(", ") + ", com cópia para o financeiro." : "O e-mail não foi enviado. " + mailMsg);
+        if (!bankOk) partes.push("Os dados bancários não foram enviados. " + bankMsg);
+        alert(partes.join(" "));
       }
-      return { ok: true, billId: String(billId), bankSent: bankOk, error: bankOk ? "" : bankMsg };
+      return { ok: true, billId: String(billId), bankSent: bankOk, emailSent: mailOk, error: (bankOk && mailOk) ? "" : [bankMsg, mailMsg].filter(Boolean).join(" ") };
     } catch (e) {
       g.billBusy = false;
       g.bankBusy = false;
@@ -2455,13 +2494,75 @@ const RydooApp = {
     }
   },
 
+  dataBr(iso) {
+    const m = String(iso || "").match(/^(\d{4})-(\d{2})-(\d{2})$/);
+    return m ? m[3] + "/" + m[2] + "/" + m[1] : "";
+  },
+
+  nomePdf(g, comp) {
+    const nome = String((g.creditor && g.creditor.name) || g.pessoa || "credor").replace(/[\\/:*?"<>|]/g, " ").replace(/\s+/g, " ").trim();
+    const mes = this.mesNome(comp) || "reembolso";
+    return nome + " - Reembolso " + mes + ".pdf";
+  },
+
+  remetenteNaiara() {
+    const u = (window.AppState && AppState.currentUser) || {};
+    const blob = this.fold([u.email, u.name, u.nome].filter(Boolean).join(" "));
+    return blob.indexOf("NAIARA") >= 0;
+  },
+
+  async emailsDoCredor(id) {
+    if (!this._emailsCredor) this._emailsCredor = {};
+    if (this._emailsCredor[id]) return this._emailsCredor[id];
+    const cad = await siengeFetchWithRetry("/creditors/" + encodeURIComponent(id));
+    const lista = (res) => (Array.isArray(res) ? res : ((res && (res.results || res.data)) || []));
+    const emails = []
+      .concat(lista(cad && cad.otherContactMethods).filter((m) => ["1", "2"].includes(String(m && m.type))).map((m) => m.address))
+      .concat(lista(cad && cad.contacts).map((c) => c && c.email))
+      .concat([cad && (cad.email || cad.mail)])
+      .map((e) => String(e || "").trim().toLowerCase())
+      .filter((e) => e.indexOf("@") > 0);
+    const unicos = [...new Set(emails)];
+    this._emailsCredor[id] = unicos;
+    return unicos;
+  },
+
+  bytesBase64(bytes) {
+    let bin = "";
+    const passo = 0x8000;
+    for (let i = 0; i < bytes.length; i += passo) {
+      bin += String.fromCharCode.apply(null, bytes.subarray(i, i + passo));
+    }
+    return btoa(bin);
+  },
+
+  async enviarEmailReembolso(info) {
+    const mes = this.mesNome(info.comp);
+    const res = await fetch("/api/rydoo-email", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        para: (info.para || []).join(", "),
+        assunto: "Reembolso Rydoo - Despesas de " + (mes || "reembolso"),
+        pagamento: info.pagamento,
+        nomePdf: info.nomePdf,
+        pdf: this.bytesBase64(info.pdf),
+        assinaturas: this.remetenteNaiara() ? ["naiara", "danielle"] : ["danielle"]
+      })
+    });
+    let data = {};
+    try { data = await res.json(); } catch (e) { data = {}; }
+    if (!res.ok || !data.sent) throw new Error((data && data.error) || "O e-mail do fechamento não foi enviado.");
+    return data;
+  },
+
   async anexarPdf(g, rows, billId) {
     const grupo = Object.assign({}, g, { rows: rows.filter((r) => r.reembolsa !== false) });
     let logo = null;
     try { logo = await this.logoJpeg(); } catch (e) { logo = null; }
     const bytes = this.montarPdf(grupo, logo);
-    const comp = this.competencia(grupo.rows).replace(".", "-") || "reembolso";
-    const nome = "reembolso-" + comp + ".pdf";
+    const comp = this.competencia(grupo.rows);
+    const nome = this.nomePdf(grupo, comp);
     const file = new Blob([bytes], { type: "application/pdf" });
     const form = new FormData();
     form.append("file", file, nome);
@@ -2475,6 +2576,7 @@ const RydooApp = {
       try { msg = await res.text(); } catch (e) {}
       throw new Error("O título " + billId + " foi criado, mas o PDF não subiu. " + msg);
     }
+    return { bytes: bytes, nome: nome };
   },
 
   async guardarTitulo(g, billId, docNum, obs, total, extra) {

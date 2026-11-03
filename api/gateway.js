@@ -16,7 +16,8 @@ const rotas = {
   "morning-warmup": require("./_lib/morning-warmup"),
   "caucao-batimento": require("./_lib/morning-warmup"),
   "distrato-followup": require("./_lib/morning-warmup"),
-  "estoque-batimento": require("./_lib/estoque-batimento")
+  "estoque-batimento": require("./_lib/estoque-batimento"),
+  "rydoo-email": require("./_lib/rydoo-email")
 };
 
 module.exports.config = {
