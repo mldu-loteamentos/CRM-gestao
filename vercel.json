@@ -15,7 +15,7 @@
     },
     {
       "path": "/api/estoque-batimento",
-      "schedule": "*/10 10-21 * * *"
+      "schedule": "0 10 * * *"
     }
   ]
 }
