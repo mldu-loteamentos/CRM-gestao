@@ -10704,7 +10704,8 @@ label.cessao-pop-field .form-control, label.cessao-pop-field select { width: 100
 .cc-table col.cc-c-vgv { width: 108px; }
 .cc-table col.cc-c-pre { width: 64px; }
 .cc-table col.cc-c-pct { width: 52px; }
-.cc-table col.cc-c-conta { width: 16%; }
+.cc-table col.cc-c-idx { width: 78px; }
+.cc-table col.cc-c-conta { width: 14%; }
 .cc-table col.cc-c-acao { width: 42px; }
 .cc-table thead th { position: sticky; top: 0; z-index: 2; background: #1b8253; color: #fff; padding: 6px; text-align: left; font-weight: 700; white-space: normal; line-height: 1.2; }
 .cc-table td { padding: 4px 6px; border-bottom: 1px solid #e8eee9; vertical-align: middle; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: #1c2e24; }

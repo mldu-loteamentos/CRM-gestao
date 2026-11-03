@@ -495,6 +495,27 @@ const OrcamentoDfcApp = {
     return "2026-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0");
   },
 
+  isoHoje() {
+    const h = new Date();
+    return h.getFullYear() + "-" + String(h.getMonth() + 1).padStart(2, "0") + "-" + String(h.getDate()).padStart(2, "0");
+  },
+
+  somaDias(iso, dias) {
+    const p = String(iso || "").split("-").map(Number);
+    const d = new Date(p[0], (p[1] || 1) - 1, (p[2] || 1) + (Number(dias) || 0));
+    return d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0");
+  },
+
+  /* A baixa de outubro pode cair no banco nos dias seguintes. A consulta vai além do fim do realizado e o mês continua sendo o do pagamento. */
+  ateConsultaCaixa() {
+    const fim = this.fimRealizado2026();
+    if (!fim) return "";
+    const hoje = this.isoHoje();
+    const teto = this.somaDias(fim, 45);
+    if (hoje <= fim) return fim;
+    return hoje < teto ? hoje : teto;
+  },
+
   notaCaixa(texto) {
     this._caixaMsg = texto || "";
     const el = document.querySelector(".orc-dfc-caixa-msg");
@@ -510,7 +531,7 @@ const OrcamentoDfcApp = {
     return !!(snap && (typeof snap.exists === "function" ? snap.exists() : snap.exists));
   },
 
-  async lerRealizadoSalvo(fim, empresas) {
+  async lerRealizadoSalvo(fim, empresas, ate) {
     const fx = window.firebaseCollections;
     const db = window.firebaseDb;
     const out = {};
@@ -520,6 +541,7 @@ const OrcamentoDfcApp = {
       if (!this.docExiste(snap)) return;
       const x = snap.data() || {};
       if (String(x.fim || "") !== String(fim)) return;
+      if (String(x.ate || "") !== String(ate || fim)) return;
       let texto = x.payload || "";
       if (Array.isArray(x.partes) && x.partes.length) {
         const blocos = await Promise.all(x.partes.map(async (pid) => {
@@ -549,7 +571,7 @@ const OrcamentoDfcApp = {
     return out;
   },
 
-  async salvarRealizadoEmpresa(companyId, fim, rows) {
+  async salvarRealizadoEmpresa(companyId, fim, rows, ate) {
     const fx = window.firebaseCollections;
     const db = window.firebaseDb;
     if (!fx || !db || !companyId) return false;
@@ -568,7 +590,8 @@ const OrcamentoDfcApp = {
     await fx.setDoc(fx.doc(db, "dfc_realizado", id), {
       empresa: String(companyId),
       fim: fim,
-      v: 2,
+      ate: String(ate || fim),
+      v: 3,
       em: new Date().toISOString(),
       n: compacto.length,
       payload: ids.length ? "" : texto,
@@ -682,8 +705,9 @@ const OrcamentoDfcApp = {
 
   async garantirMovimentos2026() {
     const fim = this.fimRealizado2026();
+    const ate = this.ateConsultaCaixa();
     const empresas = this.empresas().map((e) => String(e.id)).filter(Boolean);
-    const chave = empresas.slice().sort().join(",") + "|" + fim;
+    const chave = empresas.slice().sort().join(",") + "|" + fim + "|" + ate;
     if (this._movsProntos && this._movChave === chave && Array.isArray(this._movs2026)) return;
     const fluxo = window.FluxoCaixaApp;
     if (fluxo && typeof fluxo.ensureCategories === "function") {
@@ -691,14 +715,14 @@ const OrcamentoDfcApp = {
     }
     const inicio = "2026-01-01";
     const ja = new Set((this._movs2026 || []).map((m) => String((m && m.companyId) || "")));
-    const reuso = this.movimentosReusados(fluxo, empresas, inicio, fim);
+    const reuso = this.movimentosReusados(fluxo, empresas, inicio, ate);
     const faltam = empresas.filter((id) => !ja.has(id) && !reuso.ids.has(id));
     let extra = [];
     if (faltam.length) {
       if (!fluxo || typeof fluxo.buscarMovimentos !== "function") {
-        extra = await this.lerMovimentos(fim, faltam);
+        extra = await this.lerMovimentos(ate, faltam);
       } else {
-        extra = await fluxo.buscarMovimentos(inicio, fim, faltam);
+        extra = await fluxo.buscarMovimentos(inicio, ate, faltam);
       }
     }
     const doReuso = (reuso.movs || []).filter((m) => !ja.has(String((m && m.companyId) || "")));
@@ -837,6 +861,7 @@ const OrcamentoDfcApp = {
     const fluxo = window.FluxoCaixaApp;
     const api = window.SiengeApiService;
     const fim = this.fimRealizado2026();
+    const ate = this.ateConsultaCaixa();
     const empresas = this.empresas().map((e) => String(e.id)).filter(Boolean);
     if (!fim || !empresas.length) {
       this._lancamentos2026 = [];
@@ -848,13 +873,13 @@ const OrcamentoDfcApp = {
       this._caixaEstado = "erro";
       return;
     }
-    const chave = empresas.slice().sort().join(",") + "|" + fim;
+    const chave = empresas.slice().sort().join(",") + "|" + fim + "|" + ate;
     if (this._caixaChave === chave && Array.isArray(this._lancamentos2026)) {
       this._caixaEstado = this._lancamentos2026.length ? "ok" : "vazio";
       return;
     }
     let salvos = {};
-    try { salvos = await this.lerRealizadoSalvo(fim, empresas); } catch (e) { salvos = {}; }
+    try { salvos = await this.lerRealizadoSalvo(fim, empresas, ate); } catch (e) { salvos = {}; }
     const publicar = (aviso) => {
       const todos = [];
       empresas.forEach((id) => {
@@ -868,7 +893,7 @@ const OrcamentoDfcApp = {
       if (document.getElementById("orc-dfc-plan-box")) this.paintPlan();
     };
     const inicio = "2026-01-01";
-    const reuso = this.movimentosReusados(fluxo, empresas, inicio, fim);
+    const reuso = this.movimentosReusados(fluxo, empresas, inicio, ate);
     const buscar = empresas.filter((id) => !reuso.ids.has(String(id)) && !Object.prototype.hasOwnProperty.call(salvos, id));
     if (!buscar.length && !reuso.ids.size) {
       publicar("");
@@ -886,10 +911,12 @@ const OrcamentoDfcApp = {
     let falhaNuvem = false;
     let movs = (reuso.movs || []).slice();
     if (buscar.length && typeof fluxo.buscarMovimentos === "function") {
-      this.notaCaixa("Lendo o realizado até setembro no caixa e banco…");
+      const nomes = ["janeiro", "fevereiro", "março", "abril", "maio", "junho", "julho", "agosto", "setembro", "outubro", "novembro", "dezembro"];
+      const corte = this.corteForecast();
+      this.notaCaixa("Lendo o realizado até " + (nomes[corte - 1] || "o mês fechado") + " no caixa e banco…");
       await new Promise((resolve) => setTimeout(resolve, 0));
       try {
-        const novos = await fluxo.buscarMovimentos(inicio, fim, buscar);
+        const novos = await fluxo.buscarMovimentos(inicio, ate, buscar);
         movs = movs.concat(novos || []);
       } catch (e) {
         publicar((e && e.message) || "Não consegui completar a leitura. O que já estava salvo continua na tela.");
@@ -917,7 +944,7 @@ const OrcamentoDfcApp = {
     this._movChave = this._movsProntos ? chave : "";
     this._itens2026 = null;
     for (const id of gravar) {
-      try { await this.salvarRealizadoEmpresa(id, fim, salvos[id] || []); }
+      try { await this.salvarRealizadoEmpresa(id, fim, salvos[id] || [], ate); }
       catch (e) { falhaNuvem = true; }
     }
     publicar(falhaNuvem ? "O realizado entrou na tela, mas uma empresa não ficou salva." : "");
@@ -1057,16 +1084,16 @@ const OrcamentoDfcApp = {
     const empresas = this.selectedCompanyIds.map(String).filter(Boolean);
     if (!fluxo || typeof fluxo.buscarMovimentos !== "function") return;
     if (!empresas.length || empresas.length > 4) return;
-    const fim = this.fimRealizado2026();
-    if (!fim) return;
+    const ate = this.ateConsultaCaixa();
+    if (!ate) return;
     const inicio = "2026-01-01";
-    const reuso = this.movimentosReusados(fluxo, empresas, inicio, fim);
+    const reuso = this.movimentosReusados(fluxo, empresas, inicio, ate);
     const ja = new Set((this._movs2026 || []).map((m) => String((m && m.companyId) || "")));
     this._abPedido = this._abPedido || new Set();
     const faltam = empresas.filter((id) => !reuso.ids.has(id) && !ja.has(id) && !this._abPedido.has(id));
     if (!faltam.length) return;
     faltam.forEach((id) => this._abPedido.add(id));
-    const novos = await fluxo.buscarMovimentos(inicio, fim, faltam);
+    const novos = await fluxo.buscarMovimentos(inicio, ate, faltam);
     const ainda = new Set((this._movs2026 || []).map((m) => String((m && m.companyId) || "")));
     this._movs2026 = (this._movs2026 || []).concat((novos || []).filter((m) => !ainda.has(String((m && m.companyId) || ""))));
     this._abChave = "";
@@ -1117,16 +1144,17 @@ const OrcamentoDfcApp = {
   detalheDoCaixa(fluxo, corte) {
     if (!fluxo || !(corte > 0)) return null;
     const fim = this.fimRealizado2026();
+    const ate = this.ateConsultaCaixa();
     const inicio = "2026-01-01";
-    if (!fim) return null;
+    if (!fim || !ate) return null;
     const empresas = this.selectedCompanyIds.map(String).filter(Boolean);
     if (!empresas.length) return null;
     const marca = String((fluxo.movements || []).length) + ":" + String((this._movs2026 || []).length) + ":" + String(fluxo.loadedStart || "") + ":" + String(fluxo.loadedEnd || "");
-    const chave = empresas.slice().sort().join(",") + "|" + fim + "|" + (this.selectedCcIds || []).join(",") + "|" + marca;
+    const chave = empresas.slice().sort().join(",") + "|" + ate + "|" + (this.selectedCcIds || []).join(",") + "|" + marca;
     if (this._abChave === chave && Array.isArray(this._abDetalhe)) return this._abDetalhe;
     let contas = null;
     const ccDoCaixa = typeof fluxo.costCenterFilterSet === "function" ? fluxo.costCenterFilterSet() : null;
-    if (!ccDoCaixa && this.caixaCobre(fluxo, inicio, fim) && fluxo.accountIndex) {
+    if (!ccDoCaixa && this.caixaCobre(fluxo, inicio, ate) && fluxo.accountIndex) {
       const loaded = (fluxo.loadedCompanyIds || []).map(String);
       if (empresas.every((id) => loaded.indexOf(id) >= 0)) {
         contas = Object.keys(fluxo.accountIndex).map((k) => fluxo.accountIndex[k]);
@@ -1142,7 +1170,7 @@ const OrcamentoDfcApp = {
     }
     if (!contas && typeof fluxo.classificar === "function" && typeof fluxo.allocate === "function") {
       let movs = [];
-      const reuso = this.movimentosReusados(fluxo, empresas, inicio, fim);
+      const reuso = this.movimentosReusados(fluxo, empresas, inicio, ate);
       if (reuso.ids.size === empresas.length) movs = reuso.movs || [];
       else if (Array.isArray(this._movs2026) && this._movs2026.length) {
         const tem = new Set(this._movs2026.map((m) => String((m && m.companyId) || "")));

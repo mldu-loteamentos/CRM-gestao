@@ -125,6 +125,7 @@ const CentrosCustoApp = {
       let customFieldsChanged = false;
       let reclassificou = false;
       let semeouRegistro = false;
+      let semeouIndexador = false;
       ccList.forEach(cc => {
           const idStr = String(cc.id);
           if (!CentrosCustoState.customFields[cc.id]) {
@@ -180,12 +181,19 @@ const CentrosCustoApp = {
               customFieldsChanged = true;
               semeouRegistro = true;
           }
+          const padraoObra = this.indexadorPadraoDe(idStr);
+          if (padraoObra && !Object.prototype.hasOwnProperty.call(custom, "indexador_padrao")) {
+              custom.indexador_padrao = padraoObra;
+              custom.updatedAt = Date.now();
+              customFieldsChanged = true;
+              semeouIndexador = true;
+          }
       });
       
       if (customFieldsChanged) {
           this.gravarLocal(JSON.stringify(CentrosCustoState.customFields));
       }
-      if ((reclassificou || semeouRegistro) && typeof window.persistCentrosCustoCustomToFirebase === "function") {
+      if ((reclassificou || semeouRegistro || semeouIndexador) && typeof window.persistCentrosCustoCustomToFirebase === "function") {
           window.persistCentrosCustoCustomToFirebase().catch((e) => console.warn("[CentrosCusto] parametrização na nuvem:", e));
       }
       
@@ -294,6 +302,11 @@ const CentrosCustoApp = {
     }
     const registroEl = document.getElementById(`edit-registro-imovel-${id}`);
     if (registroEl) custom.registro_imovel = String(registroEl.value || "").trim();
+    const idxEl = document.getElementById(`edit-indexador-${id}`);
+    if (idxEl) {
+      custom.indexador_padrao = this.normalizarIndexador(idxEl.value);
+      this.propagarIndexador(id, custom.indexador_padrao);
+    }
     const contaEl = document.getElementById(`edit-conta-parceria-${id}`);
     let contaNova;
     // Só mexe na conta quando o usuário trocou a seleção; salvar outros campos não apaga a conta.
@@ -597,6 +610,92 @@ const CentrosCustoApp = {
     sel.dataset.loaded = "1";
   },
 
+  /**
+   * Indexador padrão da obra, informado pelo financeiro.
+   * 17701 vale para 17702 e 17703: a obra é o código sem os dois últimos dígitos.
+   */
+  obrasDoIndexador() {
+    if (this._obrasIdx) return this._obrasIdx;
+    const map = {};
+    const por = (nome, codigos) => codigos.forEach((n) => { map[String(n)] = nome; });
+    const ipc = [];
+    for (let n = 101; n <= 122; n++) ipc.push(n);
+    por("IPC-DI", ipc.concat([124, 129, 130, 131, 132]));
+    por("IGP-M", [123, 125, 126, 127, 128, 133, 134, 135, 136, 142]);
+    por("IPCA", [137, 138, 139, 140, 141, 143, 145, 147, 148, 149, 153, 161, 177]);
+    this._obrasIdx = map;
+    return map;
+  },
+
+  padraoDaObra(obra) {
+    return this.obrasDoIndexador()[String(obra || "")] || "";
+  },
+
+  normalizarIndexador(nome) {
+    const u = String(nome || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toUpperCase().replace(/[^A-Z0-9]/g, "");
+    if (!u) return "";
+    if (u === "REAL") return "REAL";
+    if (u.includes("IPCDI")) return "IPC-DI";
+    if (u.includes("IGPM")) return "IGP-M";
+    if (u.includes("IPCA")) return "IPCA";
+    return "";
+  },
+
+  mapaCustom() {
+    const mem = CentrosCustoState.customFields;
+    if (mem && Object.keys(mem).length) return mem;
+    try {
+      const raw = localStorage.getItem("crm_centros_custo_custom");
+      if (!raw) return mem || {};
+      const parsed = (typeof window.parseCentrosCustoCustomMap === "function")
+        ? window.parseCentrosCustoCustomMap(raw)
+        : (JSON.parse(raw) || {});
+      if (parsed && typeof parsed === "object") {
+        CentrosCustoState.customFields = parsed;
+        return parsed;
+      }
+    } catch (e) {}
+    return mem || {};
+  },
+
+  /** Padrão gravado no centro, no irmão da mesma obra, ou na relação informada. Vazio se a obra foi limpa de propósito. */
+  indexadorPadraoDe(id) {
+    const key = String(id || "").replace(/\D/g, "");
+    if (!key) return "";
+    const map = this.mapaCustom();
+    const direto = map[key] || map[String(Number(key))];
+    if (direto && Object.prototype.hasOwnProperty.call(direto, "indexador_padrao")) {
+      return this.normalizarIndexador(direto.indexador_padrao);
+    }
+    const obra = this.obraDe(key);
+    const chaves = Object.keys(map);
+    let viuFamilia = false;
+    for (let i = 0; i < chaves.length; i++) {
+      const rec = map[chaves[i]];
+      if (!rec || this.obraDe(chaves[i]) !== obra || !Object.prototype.hasOwnProperty.call(rec, "indexador_padrao")) continue;
+      viuFamilia = true;
+      const n = this.normalizarIndexador(rec.indexador_padrao);
+      if (n && n !== "REAL") return n;
+    }
+    if (viuFamilia) return "";
+    return this.padraoDaObra(obra);
+  },
+
+  propagarIndexador(id, nome) {
+    const valor = this.normalizarIndexador(nome);
+    this.irmaosObra(id).forEach((c) => {
+      const key = String(c.id);
+      if (key === String(id)) return;
+      const outro = Object.assign({}, this.customOf(key), {
+        cc_id: key,
+        indexador_padrao: valor,
+        updatedAt: Date.now()
+      });
+      CentrosCustoState.customFields[key] = outro;
+      CentrosCustoState.customFields[c.id] = outro;
+    });
+  },
+
   /** 17701, 17702 e 17703 são a mesma obra: o número é o código sem os dois últimos dígitos. */
   obraDe(id) {
     const s = String(id == null ? "" : id);
@@ -794,6 +893,10 @@ const CentrosCustoApp = {
       if (!perc_terrenista && mlPar > 0 && mlPar < 100) valorTerr = fmtPct(100 - mlPar);
     }
     const parRotulo = par ? `${par.outro.id} – ${par.outro.name || ''}` : '';
+    const indexadorPadrao = this.normalizarIndexador(custom.indexador_padrao) || this.indexadorPadraoDe(id);
+    const opcoesIndexador = ["IPC-DI", "IGP-M", "IPCA"].map((n) =>
+      `<option value="${n}" ${indexadorPadrao === n ? "selected" : ""}>${n}</option>`
+    ).join("");
 
     const modalHtml = `
       <div id="cc-modal-overlay" style="position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; background: rgba(0,0,0,0.5); z-index: 9999; display: flex; justify-content: center; align-items: center;">
@@ -838,6 +941,17 @@ const CentrosCustoApp = {
                   <input type="number" id="edit-perc-terrenista-${id}" class="form-control" step="0.01" min="0" max="100" value="${valorTerr}" ${par && par.papel === 'ml' ? 'disabled' : ''} oninput="CentrosCustoApp.completarRateio(${id}, 'terrenista')">
                   ${par && par.papel === 'ml' ? `<small style="display:block;margin-top:4px;color:#64748b;">Fica no CC ${this.escHtml(parRotulo)}.</small>` : ''}
                 </div>
+            </div>
+            <div>
+              <label for="edit-indexador-${id}" style="display:block; font-weight:bold; margin-bottom:5px; font-size:0.85rem;">Indexador padrão</label>
+              <select id="edit-indexador-${id}" class="form-control">
+                <option value="">Selecione...</option>
+                ${opcoesIndexador}
+              </select>
+              <p style="margin:6px 0 0; font-size:0.75rem; color:#64748b; line-height:1.4;">
+                Vale para esta obra${irmaos.length ? ` e para ${this.escHtml(irmaos.join(", "))}` : ""}.
+                Na repactuação, o contrato pode usar este indexador ou REAL.
+              </p>
             </div>
             <div id="edit-assoc-panel-${id}" style="display:${showAssoc ? 'block' : 'none'}; padding:14px; background:#f0fdf4; border:1px solid #bbf7d0; border-radius:8px;">
               <h4 style="margin:0 0 6px 0; color:#14532d; font-size:0.9rem;">Loteamento fechado</h4>
@@ -1164,7 +1278,7 @@ const CentrosCustoApp = {
       return;
     }
     const preamblesList = (AppState && AppState.preamblesList) ? AppState.preamblesList : [];
-    const aoa = [["ID Empresa", "ID CC", "Centro de Custo", "Tipo", "Valor VGV", "ID Preâmbulo", "% Moura Leite", "% Terrenista", "Conta parceria"]];
+    const aoa = [["ID Empresa", "ID CC", "Centro de Custo", "Tipo", "Valor VGV", "ID Preâmbulo", "% Moura Leite", "% Terrenista", "Indexador padrão", "Conta parceria"]];
     rows.forEach((cc) => {
       const custom = this.customOf(cc.id);
       const v = this.vgvDe(cc.id);
@@ -1178,6 +1292,7 @@ const CentrosCustoApp = {
         found ? found.id : "",
         custom.perc_ml ? custom.perc_ml : "",
         custom.perc_terrenista ? custom.perc_terrenista : "",
+        this.indexadorPadraoDe(cc.id),
         custom.conta_parceria ? this.contaLabel(custom.conta_parceria) : (this.isParceiro(cc) ? "Parceiro sem conta" : "")
       ]);
     });
@@ -1231,7 +1346,7 @@ const CentrosCustoApp = {
         <table class="cc-table">
           <colgroup>
             <col class="cc-c-emp"><col class="cc-c-id"><col class="cc-c-nome"><col class="cc-c-tipo"><col class="cc-c-vgv">
-            <col class="cc-c-pre"><col class="cc-c-pct"><col class="cc-c-pct"><col class="cc-c-conta"><col class="cc-c-acao">
+            <col class="cc-c-pre"><col class="cc-c-pct"><col class="cc-c-pct"><col class="cc-c-idx"><col class="cc-c-conta"><col class="cc-c-acao">
           </colgroup>
           <thead>
             <tr>
@@ -1243,6 +1358,7 @@ const CentrosCustoApp = {
               <th class="is-center">Preâmb.</th>
               <th class="is-center">% ML</th>
               <th class="is-center">% Terr.</th>
+              <th class="is-center">Indexador</th>
               <th>Conta</th>
               <th class="is-center"></th>
             </tr>
@@ -1251,7 +1367,7 @@ const CentrosCustoApp = {
     `;
 
     if (filteredCCs.length === 0) {
-      html += `<tr><td colspan="10" style="text-align: center; padding: 30px;">Nenhum centro de custo para exibir.</td></tr>`;
+      html += `<tr><td colspan="11" style="text-align: center; padding: 30px;">Nenhum centro de custo para exibir.</td></tr>`;
     }
 
     const preamblesList = (AppState && AppState.preamblesList) ? AppState.preamblesList : [];
@@ -1284,6 +1400,7 @@ const CentrosCustoApp = {
           <td class="is-center">${this.escHtml(preambulo)}</td>
           <td class="is-center">${this.escHtml(percMl)}</td>
           <td class="is-center">${this.escHtml(percTerr)}</td>
+          <td class="is-center">${this.escHtml(this.indexadorPadraoDe(cc.id) || "—")}</td>
           <td class="${custom.conta_parceria ? "cc-conta" : (this.isParceiro(cc) ? "cc-sem-conta" : "")}">${custom.conta_parceria
             ? this.escHtml(this.contaLabel(custom.conta_parceria))
             : (this.isParceiro(cc) ? "Parceiro sem conta" : "-")}</td>

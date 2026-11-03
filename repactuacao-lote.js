@@ -176,8 +176,30 @@ const RepactuacaoLoteApp = {
 
   ehReal(idx, indexerId) {
     const nome = String((idx && idx.name) || "").trim().toUpperCase();
-    const id = String(indexerId != null ? indexerId : (idx && idx.id != null ? idx.id : ""));
-    return nome === "REAL" || id === "0";
+    const id = String(indexerId != null ? indexerId : (idx && idx.id != null ? idx.id : "")).trim().toUpperCase();
+    return nome === "REAL" || id === "0" || id === "REAL";
+  },
+
+  idNoTexto(txt) {
+    const m = String(txt || "").match(/\b(\d{4,6})\b/);
+    return m ? m[1] : "";
+  },
+
+  /** O contrato passa com o indexador padrão da obra ou com REAL. Outro id, como 8 fora do padrão, diverge. */
+  classificarIndexador(row) {
+    const atual = row || {};
+    const app = window.CentrosCustoApp;
+    const ccId = String(atual.ccId || "").replace(/\D/g, "") || this.idNoTexto(atual.cc);
+    const padrao = app && typeof app.indexadorPadraoDe === "function" ? app.indexadorPadraoDe(ccId) : "";
+    if (!padrao) return { ...atual, idxOk: null, idxPadrao: "" };
+    const idx = this.indexerById(atual.indexerId);
+    if (this.ehReal(idx, atual.indexerId)) return { ...atual, idxOk: true, idxPadrao: padrao };
+    const nome = app.normalizarIndexador(idx && idx.name);
+    if (!nome) {
+      if (!this.state.indexers.length) return { ...atual, idxOk: null, idxPadrao: padrao };
+      return { ...atual, idxOk: false, idxPadrao: padrao };
+    }
+    return { ...atual, idxOk: nome === app.normalizarIndexador(padrao), idxPadrao: padrao };
   },
 
   sameMonth(a, b) {
@@ -622,9 +644,11 @@ const RepactuacaoLoteApp = {
       if (!isInstallment) return;
 
       const rowCc = col.cc != null ? String(row[col.cc] || "").trim() : "";
+      const ccTxt = rowCc || cc;
       rows.push({
         empresa,
-        cc: rowCc || cc,
+        cc: ccTxt,
+        ccId: this.idNoTexto(ccTxt),
         cliente, documento, titulo,
         parcela: Math.round(parcela),
         vencimento: this.parseDate(row[col.vencimento]),
@@ -751,7 +775,7 @@ const RepactuacaoLoteApp = {
       const expectedBase = retro != null && adjust ? this.expectedBaseIso(adjust, retro) : null;
       const dataBaseEsperada = !real && retro != null && adjust ? this.dataBaseEsperadaIso(adjust, retro) : null;
       const baseOk = dataBaseEsperada && row.excelBase ? this.sameMonth(dataBaseEsperada, row.excelBase) : null;
-      return {
+      return this.classificarIndexador({
         ...row,
         indexerName: idx ? idx.name : (real ? "REAL" : "—"),
         retro,
@@ -767,7 +791,7 @@ const RepactuacaoLoteApp = {
         siengeConsultado: false,
         siengeAchou: false,
         accMissing: []
-      };
+      });
     });
   },
 
@@ -897,6 +921,7 @@ const RepactuacaoLoteApp = {
       }));
     }
     if (!vivo()) return;
+    this.state.rows = this.state.rows.map((row) => this.classificarIndexador(row));
     this.state.loading = false;
     this.state.progresso = 100;
     this.render();
@@ -1003,14 +1028,14 @@ const RepactuacaoLoteApp = {
     const dado = info || {};
     this.state.rows = this.state.rows.map((row) => {
       if (String(row.titulo) !== String(titulo)) return row;
-      return {
+      return this.classificarIndexador({
         ...row,
         companyId: dado.companyId || row.companyId || "",
         empresa: dado.empresa || row.empresa || "",
         ccId: dado.ccId || row.ccId || "",
         obraId: dado.obraId || dado.ccId || row.obraId || "",
         empreendimento: dado.empreendimento || row.empreendimento || row.cc || ""
-      };
+      });
     });
   },
 
@@ -1213,7 +1238,7 @@ const RepactuacaoLoteApp = {
     grupos.forEach((g) => {
       const s = this.statusGrupo(g.parcelas);
       if (s === "conferido") conferidos += 1;
-      else if (s === "divergente" || s === "database") divergentes += 1;
+      else if (s === "divergente" || s === "database" || s === "indexador") divergentes += 1;
     });
     return { titles: grupos.length, conferidos: conferidos, divergentes: divergentes, n: this.state.rows.length };
   },
@@ -1243,6 +1268,7 @@ const RepactuacaoLoteApp = {
   /** conferido = valor projetado no Integra bateu com o Excel, parcela a parcela. */
   statusDe(r) {
     if (r.baseOk === false) return "database";
+    if (r.idxOk === false) return "indexador";
     if (r.valorOk === false) return "divergente";
     if (r.valorOk === true) return "conferido";
     if (r.siengeConsultado && !r.siengeAchou) return "sem";
@@ -1253,6 +1279,7 @@ const RepactuacaoLoteApp = {
   statusGrupo(parcelas) {
     const lista = parcelas || [];
     if (lista.some((r) => this.statusDe(r) === "database")) return "database";
+    if (lista.some((r) => this.statusDe(r) === "indexador")) return "indexador";
     if (lista.some((r) => this.statusDe(r) === "divergente")) return "divergente";
     if (lista.length && lista.every((r) => this.statusDe(r) === "conferido")) return "conferido";
     if (lista.some((r) => this.statusDe(r) === "sem")) return "sem";
@@ -1260,9 +1287,11 @@ const RepactuacaoLoteApp = {
     return "pendente";
   },
 
-  statusChip(kind) {
+  statusChip(kind, title) {
+    const dica = title ? ` title="${this.esc(title)}"` : "";
     if (kind === "conferido") return `<span class="est-fin-chip est-fin-Adimplente">Valor conferido ✓</span>`;
     if (kind === "database") return `<span class="est-fin-chip est-fin-Inadimplente">Data base</span>`;
+    if (kind === "indexador") return `<span class="est-fin-chip est-fin-Inadimplente"${dica}>Indexador</span>`;
     if (kind === "divergente") return `<span class="est-fin-chip est-fin-Inadimplente">Divergente</span>`;
     if (kind === "sem") return `<span class="est-fin-chip est-fin-Inadimplente">Sem Sienge</span>`;
     if (kind === "conferindo") return `<span class="est-fin-chip est-fin-apurar">Conferindo</span>`;
@@ -1328,7 +1357,7 @@ const RepactuacaoLoteApp = {
     if (f === "ok") grupos = grupos.filter((g) => this.statusGrupo(g.parcelas) === "conferido");
     else if (f === "valor") grupos = grupos.filter((g) => {
       const s = this.statusGrupo(g.parcelas);
-      return s === "divergente" || s === "database";
+      return s === "divergente" || s === "database" || s === "indexador";
     });
     else if (f === "base") grupos = grupos.filter((g) => g.parcelas.some((r) => r.baseOk === false));
     return grupos;
@@ -1365,8 +1394,15 @@ const RepactuacaoLoteApp = {
     const idxs = this.indexadoresDo(g);
     const rotulos = idxs.map((r) => this.rotuloIdx(r));
     const texto = rotulos.join(" · ") || "—";
-    const title = rotulos.length > 1 ? `Mais de um indexador: ${rotulos.join(", ")}` : texto;
-    return { texto, title };
+    const ruim = (g.parcelas || []).some((r) => r.idxOk === false);
+    const padrao = ((g.parcelas || []).find((r) => r.idxPadrao) || {}).idxPadrao || "";
+    let title = rotulos.length > 1 ? `Mais de um indexador: ${rotulos.join(", ")}` : texto;
+    if (ruim) {
+      title = padrao
+        ? `Padrão do empreendimento: ${padrao}. Neste contrato: ${rotulos.join(", ")}. REAL também é aceito.`
+        : "Indexador diferente do padrão do empreendimento. REAL também é aceito.";
+    }
+    return { texto, title, ruim };
   },
 
   textoRetro(g) {
@@ -1413,15 +1449,18 @@ const RepactuacaoLoteApp = {
       const valClass = r.valorOk === false ? "color:#b91c1c;font-weight:700;" : (r.valorOk ? "color:#15803d;font-weight:700;" : "");
       const base = this.textoDataBaseParcela(r);
       const baseStyle = base.ruim ? "color:#b91c1c;font-weight:700;" : "";
+      const idxRuim = r.idxOk === false;
+      const idxTitle = idxRuim && r.idxPadrao ? `Padrão do empreendimento: ${r.idxPadrao}. REAL também é aceito.` : "";
+      const sit = this.statusDe(r);
       return `<tr>
         <td>${this.esc(r.parcela)}</td>
         <td>${this.esc(this.fmtDate(r.vencimento))}</td>
-        <td>${this.esc(this.rotuloIdx(r))}</td>
+        <td style="${idxRuim ? "color:#b91c1c;font-weight:700;" : ""}" title="${this.esc(idxTitle)}">${this.esc(this.rotuloIdx(r))}</td>
         <td style="${baseStyle}" title="${this.esc(base.title)}">${this.esc(base.texto)}</td>
         <td>${this.esc(this.money(r.siengeValor))}</td>
         <td style="${valClass}">${this.esc(this.money(r.crmProjetado))}</td>
         <td style="${valClass}">${this.esc(this.money(r.excelValor))}</td>
-        <td>${this.statusChip(this.statusDe(r))}</td>
+        <td>${this.statusChip(sit, sit === "indexador" ? idxTitle : "")}</td>
       </tr>`;
     }).join("");
     return `<tr class="repac-det">
@@ -1844,6 +1883,8 @@ const RepactuacaoLoteApp = {
       const base = this.textoDataBase(g);
       const obraTxt = this.rotuloObra(g.obraId || g.ccId, g.empreendimento);
       const baseClass = base.ruim ? "color:#b91c1c;font-weight:700;" : (base.ok ? "color:#15803d;" : "");
+      const idxClass = idx.ruim ? "color:#b91c1c;font-weight:700;" : "";
+      const situacao = this.statusGrupo(g.parcelas);
       return `<tr class="repac-tit${aberto ? " is-open" : ""}" onclick="RepactuacaoLoteApp.toggleTitulo('${encodeURIComponent(g.key)}')">
         <td class="repac-seta-cel"><i data-lucide="chevron-right" class="repac-seta"></i></td>
         <td>${this.esc(g.titulo)}</td>
@@ -1851,12 +1892,12 @@ const RepactuacaoLoteApp = {
         <td class="repac-elipse repac-empresa" title="${this.esc(g.empresa || "")}">${this.esc(g.empresa || "—")}</td>
         <td class="repac-elipse" title="${this.esc(g.documento || "")}">${this.esc(g.documento || "—")}</td>
         <td class="repac-elipse" title="${this.esc(obraTxt)}">${this.esc(obraTxt)}</td>
-        <td class="repac-elipse" title="${this.esc(idx.title)}">${this.esc(idx.texto)}</td>
+        <td class="repac-elipse" style="${idxClass}" title="${this.esc(idx.title)}">${this.esc(idx.texto)}</td>
         <td>${this.esc(this.textoRetro(g))}</td>
         <td class="repac-elipse" style="${baseClass}" title="${this.esc(base.title)}">${this.esc(base.texto)}</td>
         <td>${this.esc(this.textoAcum(g))}</td>
         <td class="repac-parc" title="${this.esc(parcTitle)}">${this.esc(parcTxt)}</td>
-        <td class="repac-status">${this.statusChip(this.statusGrupo(g.parcelas))}</td>
+        <td class="repac-status">${this.statusChip(situacao, situacao === "indexador" ? idx.title : "")}</td>
       </tr>${aberto ? this.parcelasHtml(g) : ""}`;
     }).join("");
     return `
