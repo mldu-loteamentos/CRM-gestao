@@ -3629,15 +3629,11 @@ const OrcamentoDfcApp = {
     if (!abas.length) {
       throw new Error("Não achei a planilha com as colunas EMPRESA, CONTA e os meses de janeiro a dezembro.");
     }
-    /* Fórmulas primeiro. A aba digitada, ou a Importação quando as duas são valores, fica por último e substitui a chave antiga. */
-    abas.sort((a, b) => {
-      if (Math.abs(a.formulas - b.formulas) > 0.15) return b.formulas - a.formulas;
-      if (a.nome === "IMPORTACAO") return 1;
-      if (b.nome === "IMPORTACAO") return -1;
-      return 0;
-    });
+    /* A aba Importação é a base. Conta que saiu dela não volta das outras abas, mesmo que uma fórmula antiga ainda calcule o valor. */
+    const importacao = abas.filter((a) => a.nome === "IMPORTACAO");
+    const fonte = importacao.length ? importacao : abas.slice().sort((a, b) => a.formulas - b.formulas).slice(0, 1);
     const grupos = new Map();
-    abas.forEach((aba) => {
+    fonte.forEach((aba) => {
       const por = new Map();
       aba.linhas.forEach((l) => {
         const k = this.chaveLinha(l);
