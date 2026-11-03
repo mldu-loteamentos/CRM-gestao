@@ -687,6 +687,7 @@ const EstoqueComercialApp = {
         batimentoDate: meta.batimentoDate || null,
         batimentoAt: meta.batimentoAt || meta.snapshotAt || meta.fetchedAt || null,
         batimentoDone: meta.batimentoDone === true || meta.batimentoDone === "true",
+        obrasLeft: Number(meta.obrasLeft) || 0,
         unitsSavedDate: meta.unitsSavedDate || null
       };
     } catch (e) {
@@ -984,8 +985,10 @@ const EstoqueComercialApp = {
     let n = 0;
     const tick = async () => {
       n += 1;
-      if (n > 40 || this.state.batimentoDate === today && this.state.batimentoDone) {
+      if (n > 200 || (this.state.batimentoDate === today && this.state.batimentoDone)) {
         if (this.state.batimentoDone) this.setProgress("");
+        else if (!this.state._confGeralRunning) this.setProgress("A posição do dia ainda não fechou. Forçar o que falta continua de onde parou.");
+        this.paintForcarBotao();
         return;
       }
       try {
@@ -1005,7 +1008,11 @@ const EstoqueComercialApp = {
         }
         if (fb && fb.batimentoDate === today && fb.batimentoDone) {
           this.setProgress("");
+          this.paintForcarBotao();
           return;
+        }
+        if (!this.state._confGeralRunning && fb && fb.obrasLeft > 0) {
+          this.setProgress(`Atualizando a posição do dia… faltam ${fb.obrasLeft} empreendimento(s).`);
         }
       } catch (e) {}
       setTimeout(tick, 20000);
@@ -1375,21 +1382,30 @@ const EstoqueComercialApp = {
   },
 
   /** A tela só mostrava a conferência antiga. Se o dia não fechou, continua daqui. */
-  async garantirConferenciaGeral() {
-    if (this.state._confGeralRunning || this.state._autoFinanceRunning || this.state.loading) return;
+  async garantirConferenciaGeral(opts) {
+    const forcar = !!(opts && opts.forcar);
+    if (this.state._confGeralRunning) return;
+    if (!forcar && (this.state._autoFinanceRunning || this.state.loading)) return;
     if (!this.state.units.length) return;
     this.fillEnterprisesFromUnits();
     if (!this.state.enterprises.length) {
       try { await this.loadEnterprises(); } catch (e) {}
     }
-    if (this.conferenciaGeralDoDiaCompleta()) return;
+    if (!forcar && this.conferenciaGeralDoDiaCompleta()) return;
+    if (forcar && this.faltamConferencia() === 0) {
+      this.setProgress(this.state.batimentoDate === this.todayStr() && this.state.batimentoDone
+        ? "O batimento de hoje já está completo."
+        : "A conferência já tem todos os empreendimentos. A posição do dia segue no servidor.");
+      return;
+    }
     this.state._confGeralRunning = true;
     this.state.stopSync = false;
     this.setBusy(true);
     try {
       const g = this.loadConferenciaGeral();
       const mesmoDia = !!(g && String(g.at || "").startsWith(this.todayStr()));
-      await this.conferirTodos({ retomar: !!(mesmoDia && (g.interrompido || g.rodando)) });
+      const retomar = !!(g && (g.ccs || []).length && (forcar || (mesmoDia && (g.interrompido || g.rodando))));
+      await this.conferirTodos({ retomar });
     } catch (e) {
       console.warn("[Estoque] conferência geral", e);
       this.setProgress("A conferência com o Sienge parou: " + ((e && e.message) || e));
@@ -1542,6 +1558,73 @@ const EstoqueComercialApp = {
     el.textContent = day
       ? `${n} unidades · situação de ${day}${incompleta}${erro}`
       : `${n} unidades · atualizando a situação financeira${incompleta}${erro}`;
+    this.paintForcarBotao();
+  },
+
+  faltamConferencia() {
+    const ids = this.ccsParaConferir();
+    const g = this.loadConferenciaGeral();
+    const feitos = new Set(((g && g.ccs) || []).map((c) => String(c.ccId)));
+    return ids.filter((id) => !feitos.has(String(id))).length;
+  },
+
+  paintForcarBotao() {
+    const btn = document.getElementById("est-btn-forcar");
+    if (!btn) return;
+    const hoje = this.todayStr();
+    const posicaoAberta = !(this.state.batimentoDate === hoje && this.state.batimentoDone);
+    const falta = this.faltamConferencia();
+    btn.style.display = (posicaoAberta || falta > 0) ? "" : "none";
+    btn.textContent = falta > 0 ? `Forçar o que falta (${falta})` : "Forçar o que falta";
+    btn.disabled = !!this._forcarRodando;
+  },
+
+  /** Continua a posição no servidor e a conferência dos empreendimentos que ainda não entraram. */
+  async forcarOQueFalta() {
+    if (this._forcarRodando) {
+      this.setProgress("O batimento do que falta já está rodando.");
+      return;
+    }
+    this._forcarRodando = true;
+    this.state.stopSync = false;
+    this.paintForcarBotao();
+    const today = this.todayStr();
+    const falta = this.faltamConferencia();
+    this.setProgress(falta > 0
+      ? `Forçando o que falta… ${falta} empreendimento(s) na conferência, e a posição do dia no servidor.`
+      : "Forçando a posição do dia no servidor…");
+    try {
+      if (this.fbReady()) {
+        const { doc, setDoc } = window.firebaseCollections;
+        await setDoc(doc(window.firebaseDb, "sienge_defaulters_history", today), {
+          batimentoPedidoEm: new Date().toISOString()
+        }, { merge: true });
+      }
+    } catch (e) {}
+    const pedir = (force) => fetch("/api/estoque-batimento?pedido=1" + (force ? "&force=1" : ""), { method: "GET", keepalive: true }).catch(() => {});
+    pedir(true);
+    if (this._forcarTimer) clearInterval(this._forcarTimer);
+    let ticks = 0;
+    this._forcarTimer = setInterval(() => {
+      ticks += 1;
+      const fechou = this.state.batimentoDate === today && this.state.batimentoDone;
+      if (ticks > 200 || fechou) {
+        clearInterval(this._forcarTimer);
+        this._forcarTimer = null;
+        if (fechou && !this.state._confGeralRunning) this.setProgress("");
+        this.paintForcarBotao();
+        return;
+      }
+      pedir(false);
+    }, 50000);
+    this._pedidoBatimento = true;
+    this.acompanharBatimento(today);
+    try {
+      await this.garantirConferenciaGeral({ forcar: true });
+    } finally {
+      this._forcarRodando = false;
+      this.paintForcarBotao();
+    }
   },
 
   normName(name) {
@@ -3876,7 +3959,7 @@ const EstoqueComercialApp = {
     const retomar = !!(opts && opts.retomar && previa);
     const feitos = new Set(retomar ? (previa.ccs || []).map((c) => String(c.ccId)) : []);
     const geral = retomar
-      ? { at: previa.at, ccs: (previa.ccs || []).slice(), falhas: (previa.falhas || []).filter((id) => !feitos.has(String(id))), interrompido: false, rodando: true }
+      ? { at: new Date().toISOString(), ccs: (previa.ccs || []).slice(), falhas: (previa.falhas || []).filter((id) => !feitos.has(String(id))), interrompido: false, rodando: true }
       : { at: new Date().toISOString(), ccs: [], falhas: [], interrompido: false, rodando: true };
     const fila = ids.filter((id) => !feitos.has(String(id)));
     const gravar = () => {
@@ -4025,11 +4108,12 @@ const EstoqueComercialApp = {
       <div class="est-conf-h">
         <strong>Conferência de todos os empreendimentos com o Contas a Receber do Sienge</strong>
         <small>${hora} · ${g.ccs.length} empreendimento(s)${g.falhas.length ? ` · <span class="est-conf-falha" style="display:inline">sem resposta do Sienge: ${g.falhas.map(esc).join(", ")}</span>` : ""}${g.rodando ? " · conferindo" : (g.interrompido ? " · interrompida" : "")}</small>
+        ${(g.rodando || bate) ? "" : `<button type="button" class="est-forcar-falta" onclick="EstoqueComercialApp.forcarOQueFalta()">Forçar o que falta</button>`}
       </div>
       <div class="est-conf-grid">
         <div><label>Sienge · a receber</label><b>${this.money(tot.sienge)}</b><small>Em atraso com juros e multa ${this.money(tot.siengeAtraso)} em ${tot.siengeTitVenc} título(s)</small></div>
         <div><label>Integra · a receber</label><b>${this.money(tot.integra)}</b><small>Em atraso ${this.money(tot.integraAtraso)} em ${tot.integraInad} contrato(s)</small></div>
-        <div><label>Diferença</label><b>${g.rodando ? "Conferindo" : (bate ? "Bate" : (g.interrompido ? "Incompleta" : this.money(dif)))}</b><small>${g.rodando ? "A conferência está percorrendo os empreendimentos. O total cresce a cada um que termina." : (g.interrompido ? `Parou em ${g.ccs.length} empreendimento(s). Ao abrir a tela de novo, continua do ponto em que parou.` : (tot.semUnidN ? `${tot.semUnidN} título(s) com saldo no Sienge sem unidade ativa no Integra: ${this.money(tot.semUnidV)}` : "Todo título com saldo tem unidade no Integra"))}${!g.rodando && !g.interrompido && tot.semTitulo ? ` · ${tot.semTitulo} unidade(s) ativa(s) sem título no Sienge` : ""}</small></div>
+        <div><label>Diferença</label><b>${g.rodando ? "Conferindo" : (bate ? "Bate" : (g.interrompido ? "Incompleta" : this.money(dif)))}</b><small>${g.rodando ? "A conferência está percorrendo os empreendimentos. O total cresce a cada um que termina." : (g.interrompido ? `Parou em ${g.ccs.length} empreendimento(s). Forçar o que falta continua dos que ainda não entraram.` : (tot.semUnidN ? `${tot.semUnidN} título(s) com saldo no Sienge sem unidade ativa no Integra: ${this.money(tot.semUnidV)}` : "Todo título com saldo tem unidade no Integra"))}${!g.rodando && !g.interrompido && tot.semTitulo ? ` · ${tot.semTitulo} unidade(s) ativa(s) sem título no Sienge` : ""}</small></div>
       </div>
       ${acertarHtml}
       ${analisarHtml}

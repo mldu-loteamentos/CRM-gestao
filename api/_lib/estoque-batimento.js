@@ -65,15 +65,48 @@ function authorized(req) {
   return auth === `Bearer ${secret}` || q === secret;
 }
 
-/** A tela e o fechamento da fila pedem o batimento sem o segredo do cron. Só vale por 30 minutos depois do pedido. */
-async function pedidoRecente() {
+/** A tela pede o batimento sem o segredo do cron. O botão de forçar fica valendo por 4 horas. */
+async function pedidoRecente(semFila) {
   const snap = await getDoc(doc(db, "sienge_defaulters_history", todayIsoSP()));
   if (!snap.exists()) return false;
   const data = snap.data() || {};
   const pronta = Number(data.chunks) > 0 && !!(data.paidMap || data.warmupDone || data.atFull || data.timestampStr);
-  if (!pronta) return false;
+  if (!semFila && !pronta) return false;
   const at = Date.parse(data.batimentoPedidoEm || "");
-  return Number.isFinite(at) && Date.now() - at < 30 * 60 * 1000;
+  return Number.isFinite(at) && Date.now() - at < 4 * 60 * 60 * 1000;
+}
+
+async function filaPronta(today) {
+  const filaMeta = await getDoc(doc(db, "sienge_defaulters_history", today));
+  const filaData = filaMeta.exists() ? (filaMeta.data() || {}) : null;
+  const cache = !!(filaData && Number(filaData.chunks) > 0 && (filaData.atFull || filaData.paidMap || filaData.timestampStr));
+  return !!(filaData && (filaData.warmupDone || cache));
+}
+
+function sleep(ms) {
+  return new Promise((r) => setTimeout(r, ms));
+}
+
+/** Manda o primeiro byte na hora. Quem chamou sabe que a passagem começou e pode soltar; esta função segue até o fim. */
+function soltar(res) {
+  if (!res || res.headersSent || res._solto) return;
+  res._solto = true;
+  res.statusCode = 200;
+  res.setHeader("Content-Type", "application/json; charset=utf-8");
+  res.setHeader("Cache-Control", "no-store");
+  try { if (typeof res.flushHeaders === "function") res.flushHeaders(); } catch (e) {}
+  try { res.write(" "); } catch (e) {}
+}
+
+function terminar(res, code, body) {
+  const texto = JSON.stringify(body == null ? {} : body);
+  if (res && (res._solto || res.headersSent)) {
+    try { res.end(texto); } catch (e) {}
+    return;
+  }
+  res.statusCode = code || 200;
+  res.setHeader("Content-Type", "application/json; charset=utf-8");
+  try { res.end(texto); } catch (e) {}
 }
 
 async function siengeFetch(url, retries = 4) {
@@ -331,17 +364,22 @@ function originFromReq(req) {
   return `${proto}://${host}`;
 }
 
-async function continuarBatimento(req) {
-  const ctrl = new AbortController();
-  const timer = setTimeout(() => ctrl.abort(), 12000);
+async function continuarBatimento(req, extra) {
   const secret = process.env.CRON_SECRET || process.env.WARMUP_SECRET || "";
+  const q = new URLSearchParams({ cont: "1" });
+  if (extra && extra.espera) q.set("espera", String(extra.espera));
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), 20000);
   try {
-    await fetch(`${originFromReq(req)}/api/estoque-batimento?cont=1`, {
+    // Resolve quando o próximo envia o cabeçalho. Não aborta depois disso: a passagem segue sozinha.
+    await fetch(`${originFromReq(req)}/api/estoque-batimento?${q}`, {
       headers: secret ? { Authorization: `Bearer ${secret}` } : {},
       signal: ctrl.signal
     });
-  } catch (e) {}
-  clearTimeout(timer);
+    clearTimeout(timer);
+  } catch (e) {
+    clearTimeout(timer);
+  }
 }
 
 function segueSozinho(req) {
@@ -398,14 +436,14 @@ async function handler(req, res) {
     res.setHeader("Access-Control-Allow-Origin", "*");
     return res.status(204).end();
   }
+  const force = flag(req, "force") === "1" || flag(req, "force") === "true";
   if (!authorized(req)) {
     const querPedido = flag(req, "pedido") === "1";
-    if (!querPedido || !(await pedidoRecente())) {
+    if (!querPedido || !(await pedidoRecente(force))) {
       return res.status(401).json({ error: "unauthorized" });
     }
   }
 
-  const force = flag(req, "force") === "1" || flag(req, "force") === "true";
   if (!force && BATIMENTO_PAUSED) {
     return res.status(200).json({
       skipped: true,
@@ -416,23 +454,32 @@ async function handler(req, res) {
     });
   }
   const today = todayIsoSP();
-  const started = Date.now();
+  let started = Date.now();
   const log = [];
 
   if (!force) {
-    const filaMeta = await getDoc(doc(db, "sienge_defaulters_history", today));
-    const filaData = filaMeta.exists() ? (filaMeta.data() || {}) : null;
-    const filaCachePronto = !!(filaData && Number(filaData.chunks) > 0 && (filaData.atFull || filaData.paidMap || filaData.timestampStr));
-    const filaPronta = !!(filaData && (filaData.warmupDone || filaCachePronto));
-    if (!filaPronta) {
-      return res.status(200).json({
-        done: false,
-        waiting: "fila",
-        date: today,
-        message: "A fila de cobrança ainda está fechando inadimplentes e último pagamento. O PMP começa em seguida."
-      });
+    let pronta = await filaPronta(today);
+    if (!pronta) {
+      soltar(res);
+      const limite = Date.now() + 20000;
+      while (!pronta && Date.now() < limite) {
+        await sleep(4000);
+        pronta = await filaPronta(today);
+      }
+      if (!pronta) {
+        const espera = Number(flag(req, "espera")) || 0;
+        if (espera < 40 && segueSozinho(req)) await continuarBatimento(req, { espera: espera + 1 });
+        return terminar(res, 200, {
+          done: false,
+          waiting: "fila",
+          date: today,
+          espera,
+          message: "A fila de cobrança ainda está fechando. O batimento tenta de novo sozinho até ela fechar."
+        });
+      }
     }
   }
+  started = Date.now();
 
   try {
     const stateSnap = await getDoc(doc(db, FB_COL, STATE_ID));
@@ -463,13 +510,15 @@ async function handler(req, res) {
         });
       }
     }
+    soltar(res);
     state.touchedAt = new Date().toISOString();
     state.passes = (Number(state.passes) || 0) + 1;
+    if (!state.obraFalhas || typeof state.obraFalhas !== "object") state.obraFalhas = {};
     await setDoc(doc(db, FB_COL, STATE_ID), { ...state, done: false });
 
     let units = await loadUnits();
     if (!units.length) {
-      return res.status(200).json({ done: false, date: today, message: "Sem estoque no Firebase. A posição não foi fechada para o dia poder tentar de novo." });
+      return terminar(res, 200, { done: false, date: today, message: "Sem estoque no Firebase. A posição não foi fechada para o dia poder tentar de novo." });
     }
 
     if (!Array.isArray(state.contractsSeen)) state.contractsSeen = [];
@@ -504,9 +553,9 @@ async function handler(req, res) {
       const contractsLeft = pendingCc.filter((id) => !seenCc.has(id)).length;
       state.contractsLeft = contractsLeft;
       await setDoc(doc(db, FB_COL, STATE_ID), { ...state, done: false });
-        if (contractsLeft > 0 && state.passes < 800) {
+      if (contractsLeft > 0 && state.passes < 800) {
         if (segueSozinho(req)) await continuarBatimento(req);
-        return res.status(200).json({
+        return terminar(res, 200, {
           done: false,
           phase: "contratos",
           date: today,
@@ -555,6 +604,7 @@ async function handler(req, res) {
         batimentoDone: !!done,
         batimentoMode: mode,
         censusLeft: state.censusLeft || 0,
+        obrasLeft: state.obrasLeft || 0,
         unitsSavedDate: done ? today : (state.unitsSavedDate || null),
         snapshotAt: new Date().toISOString()
       }, { merge: true });
@@ -623,11 +673,17 @@ async function handler(req, res) {
           obrasVistas.add(String(ccId));
           obrasFeitas += 1;
           processed += aplicado.atualizadas;
+          delete state.obraFalhas[String(ccId)];
           log.push(`obra ${ccId}: ${aplicado.atualizadas} contratos, ${aplicado.semExtrato} sem título no extrato`);
         } catch (e) {
           failed += 1;
+          const nFail = (Number(state.obraFalhas[String(ccId)]) || 0) + 1;
+          state.obraFalhas[String(ccId)] = nFail;
           log.push(`obra ${ccId}: ${(e && e.message) || e}`);
-          break;
+          if (nFail >= 2) {
+            obrasVistas.add(String(ccId));
+            log.push(`obra ${ccId}: segue sem ela depois de ${nFail} falhas, para o restante fechar`);
+          }
         }
       }
     }
@@ -642,11 +698,12 @@ async function handler(req, res) {
     state.fichaLeft = restObras;
     state.obrasLeft = restObras;
     state.done = restCensus === 0 && restObras === 0;
+    state.obrasPuladas = Object.keys(state.obraFalhas || {}).filter((id) => Number(state.obraFalhas[id]) >= 2);
     const nextUnits = [...byId.values()];
     const n = await persistSnapshot(nextUnits, state.done);
 
     if (!state.done && state.passes < 800 && segueSozinho(req)) await continuarBatimento(req);
-    return res.status(200).json({
+    return terminar(res, 200, {
       done: !!state.done,
       date: today,
       mode,
@@ -670,7 +727,9 @@ async function handler(req, res) {
     });
   } catch (error) {
     console.error("[estoque-batimento]", error);
-    return res.status(500).json({ error: error.message, log });
+    const espera = Number(flag(req, "espera")) || 0;
+    if (espera < 8 && segueSozinho(req)) await continuarBatimento(req, { espera: espera + 1 });
+    return terminar(res, 500, { error: error.message, log });
   }
 }
 

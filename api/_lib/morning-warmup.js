@@ -102,17 +102,17 @@ async function dispararDistratoFollowup(req) {
   }
 }
 
-/** A posição de estoque só fecha depois da fila. A chamada é abandonada; o batimento segue sozinho. */
+/** A posição de estoque só fecha depois da fila. Espera o batimento responder e o deixa seguir sozinho. */
 async function dispararEstoque(req) {
   const ctrl = new AbortController();
-  const timer = setTimeout(() => ctrl.abort(), 2500);
+  const timer = setTimeout(() => ctrl.abort(), 20000);
   try {
     await fetch(`${originFromReq(req)}/api/estoque-batimento`, {
       headers: { Authorization: req.headers.authorization || "" },
       signal: ctrl.signal
     });
+    clearTimeout(timer);
   } catch (e) {
-  } finally {
     clearTimeout(timer);
   }
 }

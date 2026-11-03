@@ -899,59 +899,62 @@ const CentrosCustoApp = {
     ).join("");
 
     const modalHtml = `
-      <div id="cc-modal-overlay" style="position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; background: rgba(0,0,0,0.5); z-index: 9999; display: flex; justify-content: center; align-items: center;">
-        <div style="background: white; border-radius: 8px; width: 720px; max-width: 95%; max-height: 92vh; box-shadow: 0 4px 15px rgba(0,0,0,0.2); display: flex; flex-direction: column;">
-          <div style="padding: 16px 20px; border-bottom: 1px solid #eee; display: flex; justify-content: space-between; align-items: center;">
-            <h3 style="margin: 0; font-size: 1.1rem; color: var(--color-primary);">Editar Centro de Custo: ${cc.id} - ${cc.name}</h3>
+      <div id="cc-modal-overlay" class="cce-overlay">
+        <div class="cce-dialog">
+          <div class="cce-head">
+            <h3>Editar Centro de Custo: ${cc.id} - ${cc.name}</h3>
             <button type="button" class="btn btn-fechar" onclick="CentrosCustoApp.closeModal()">Fechar</button>
           </div>
-          <div style="padding: 20px; display: flex; flex-direction: column; gap: 20px; overflow-y: auto;">
-            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px;">
+          <div class="cce-body">
+            <div class="cce-grid">
               <div>
-                <label style="display: block; font-weight: bold; margin-bottom: 5px; font-size: 0.85rem;">Valor VGV (R$)</label>
+                <label class="cce-label">Valor VGV (R$)</label>
                 <input type="number" id="edit-vgv-${id}" class="form-control" step="0.01" value="${vgv}">
                 ${(() => {
                   const obra = window.SiengeApiService && SiengeApiService.obraVgvCache ? SiengeApiService.obraVgvCache(id) : null;
                   return obra && obra.vgv > 0
-                    ? `<small style="display:block;margin-top:4px;color:#105436;font-weight:600;">VGV na obra (Sienge): ${obra.vgv.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })} — este é o valor usado.</small>`
-                    : `<small style="display:block;margin-top:4px;color:#64748b;">A obra no Sienge não tem VGV; vale o valor digitado aqui.</small>`;
+                    ? `<small class="cce-hint is-ok">VGV na obra (Sienge): ${obra.vgv.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}. Este é o valor usado.</small>`
+                    : `<small class="cce-hint">A obra no Sienge não tem VGV. Vale o valor digitado aqui.</small>`;
                 })()}
               </div>
               <div>
-                <label style="display: block; font-weight: bold; margin-bottom: 5px; font-size: 0.85rem;">Tipo de Centro de Custo</label>
-                <div style="display: flex; gap: 8px;">
-                  <select id="edit-tipo-cc-${id}" class="form-control" style="flex: 1;" onchange="CentrosCustoApp.syncIncorporacaoUi(${id})">
+                <label class="cce-label">Tipo de Centro de Custo</label>
+                <div class="cce-tipo">
+                  <select id="edit-tipo-cc-${id}" class="form-control" onchange="CentrosCustoApp.syncIncorporacaoUi(${id})">
                     <option value="">Selecione...</option>
                     ${CentrosCustoState.tiposCc.map(t => `<option value="${t}" ${tipo_cc === t ? 'selected' : ''}>${t}</option>`).join('')}
                   </select>
-                  <button class="btn btn-outline" style="padding: 0 10px;" onclick="CentrosCustoApp.openManageTiposModal(${id})" title="Gerenciar Tipos">
+                  <button class="btn btn-outline" style="padding: 0 10px; height: 38px;" onclick="CentrosCustoApp.openManageTiposModal(${id})" title="Gerenciar Tipos">
                     <i data-lucide="settings" style="width: 16px;"></i>
                   </button>
                 </div>
               </div>
-            </div>
-            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px;">
-                <div>
-                  <label style="display: block; font-weight: bold; margin-bottom: 5px; font-size: 0.85rem;">Percentual Moura Leite (%)</label>
-                  <input type="number" id="edit-perc-ml-${id}" class="form-control" step="0.01" min="0" max="100" value="${valorMl}" ${par && par.papel === 'parceiro' ? 'disabled' : ''} oninput="CentrosCustoApp.completarRateio(${id}, 'ml')">
-                  ${par && par.papel === 'parceiro' ? `<small style="display:block;margin-top:4px;color:#64748b;">Fica no CC ${this.escHtml(parRotulo)}.</small>` : ''}
+              <div>
+                <label class="cce-label" for="edit-indexador-${id}">Indexador padrão</label>
+                <select id="edit-indexador-${id}" class="form-control">
+                  <option value="">Selecione...</option>
+                  ${opcoesIndexador}
+                </select>
+                <p class="cce-hint">Vale para esta obra${irmaos.length ? ` e para ${this.escHtml(irmaos.join(", "))}` : ""}. Na repactuação, o contrato pode usar este indexador ou REAL.</p>
+              </div>
+              <div>
+                <label class="cce-label">Percentual Moura Leite (%)</label>
+                <input type="number" id="edit-perc-ml-${id}" class="form-control" step="0.01" min="0" max="100" value="${valorMl}" ${par && par.papel === 'parceiro' ? 'disabled' : ''} oninput="CentrosCustoApp.completarRateio(${id}, 'ml')">
+                ${par && par.papel === 'parceiro' ? `<small class="cce-hint">Fica no CC ${this.escHtml(parRotulo)}.</small>` : ''}
+              </div>
+              <div>
+                <label class="cce-label">Percentual Terrenista (%)</label>
+                <input type="number" id="edit-perc-terrenista-${id}" class="form-control" step="0.01" min="0" max="100" value="${valorTerr}" ${par && par.papel === 'ml' ? 'disabled' : ''} oninput="CentrosCustoApp.completarRateio(${id}, 'terrenista')">
+                ${par && par.papel === 'ml' ? `<small class="cce-hint">Fica no CC ${this.escHtml(parRotulo)}.</small>` : ''}
+              </div>
+              <div>
+                <label class="cce-label">Imposto</label>
+                <div class="cce-check">
+                  <input type="checkbox" id="edit-imposto-pago-${id}" ${parceiro ? "" : (imposto_pago ? "checked" : "")} ${parceiro ? "disabled" : ""} style="width: 16px; height: 16px;">
+                  <label for="edit-imposto-pago-${id}">Imposto pago pela empresa?</label>
                 </div>
-                <div>
-                  <label style="display: block; font-weight: bold; margin-bottom: 5px; font-size: 0.85rem;">Percentual Terrenista (%)</label>
-                  <input type="number" id="edit-perc-terrenista-${id}" class="form-control" step="0.01" min="0" max="100" value="${valorTerr}" ${par && par.papel === 'ml' ? 'disabled' : ''} oninput="CentrosCustoApp.completarRateio(${id}, 'terrenista')">
-                  ${par && par.papel === 'ml' ? `<small style="display:block;margin-top:4px;color:#64748b;">Fica no CC ${this.escHtml(parRotulo)}.</small>` : ''}
-                </div>
-            </div>
-            <div>
-              <label for="edit-indexador-${id}" style="display:block; font-weight:bold; margin-bottom:5px; font-size:0.85rem;">Indexador padrão</label>
-              <select id="edit-indexador-${id}" class="form-control">
-                <option value="">Selecione...</option>
-                ${opcoesIndexador}
-              </select>
-              <p style="margin:6px 0 0; font-size:0.75rem; color:#64748b; line-height:1.4;">
-                Vale para esta obra${irmaos.length ? ` e para ${this.escHtml(irmaos.join(", "))}` : ""}.
-                Na repactuação, o contrato pode usar este indexador ou REAL.
-              </p>
+                ${parceiro ? `<small class="cce-hint">Centro de custo de parceiro: o imposto fica por conta dele e não entra no recolhimento da empresa.</small>` : ""}
+              </div>
             </div>
             <div id="edit-assoc-panel-${id}" style="display:${showAssoc ? 'block' : 'none'}; padding:14px; background:#f0fdf4; border:1px solid #bbf7d0; border-radius:8px;">
               <h4 style="margin:0 0 6px 0; color:#14532d; font-size:0.9rem;">Loteamento fechado</h4>
@@ -962,15 +965,10 @@ const CentrosCustoApp = {
                 ${irmaos.length ? `O mesmo tipo e o mesmo nome valem para os centros da obra ${this.escHtml(this.obraDe(id))}: ${this.escHtml(irmaos.join(", "))}.` : ""}
               </p>
             </div>
-            ${par ? `<p style="margin:-8px 0 0;padding:8px 12px;border-radius:6px;background:#f0fdf4;color:#14532d;font-size:0.8rem;line-height:1.4;">
+            ${par ? `<p class="cce-note">
               Centro de custo exclusivo ${par.papel === 'ml' ? 'da Moura Leite' : 'do parceiro'}: ele é 100% ${par.papel === 'ml' ? 'da Moura Leite' : 'do terrenista'}.
               O percentual aqui é a participação ${par.papel === 'ml' ? 'da Moura Leite' : 'do terrenista'} na obra. A outra parte fica no CC ${this.escHtml(parRotulo)} e é atualizada junto ao salvar, para a obra fechar 100%.
             </p>` : ''}
-            <div style="display: flex; align-items: center; gap: 8px;">
-                <input type="checkbox" id="edit-imposto-pago-${id}" ${parceiro ? "" : (imposto_pago ? "checked" : "")} ${parceiro ? "disabled" : ""} style="width: 16px; height: 16px;">
-                <label for="edit-imposto-pago-${id}" style="font-weight: bold; font-size: 0.85rem; cursor: pointer;">Imposto pago pela empresa?</label>
-            </div>
-            ${parceiro ? `<p style="margin:-12px 0 0; font-size:0.78rem; color:#64748b;">Centro de custo de parceiro: o imposto fica por conta dele e não entra no recolhimento da empresa.</p>` : ""}
 
             <div id="edit-incorp-panel-${id}" style="display:${showIncorp ? 'block' : 'none'}; padding:14px; background:#f0fdf4; border:1px solid #bbf7d0; border-radius:8px;">
               <h4 style="margin:0 0 6px 0; color:#14532d; font-size:0.9rem;">Incorporação</h4>
@@ -1007,39 +1005,41 @@ const CentrosCustoApp = {
               </div>
             </div>
             
-            <div style="padding:14px; background:${parceiro ? '#fffbeb' : '#f8fafc'}; border:1px solid ${parceiro ? '#fde68a' : '#e2e8f0'}; border-radius:8px;">
-              <h4 style="margin:0 0 6px 0; color:#334155; font-size:0.9rem;">Conta de parceria (pagamento)</h4>
-              <p style="margin:0 0 10px 0; font-size:0.75rem; color:#64748b; line-height:1.4;">
-                ${parceiro
-                  ? 'Este centro de custo é de <strong>parceiro</strong>. Os títulos a pagar dele saem por esta conta em Contas a Pagar → Gerar Pagamento.'
-                  : 'Se informada, os títulos a pagar deste centro de custo saem por esta conta em Contas a Pagar → Gerar Pagamento.'}
-              </p>
-              <select id="edit-conta-parceria-${id}" class="form-control" disabled>
-                <option value="">Carregando contas correntes da empresa ${cc.idCompany || cc.companyId || ''}...</option>
-              </select>
-            </div>
-
-            <div>
-              <label for="edit-registro-imovel-${id}" style="display:block; font-weight:bold; margin-bottom:5px; font-size:0.85rem;">Registro do imóvel na autorização de escritura</label>
-              <textarea id="edit-registro-imovel-${id}" class="form-control" rows="3" style="width:100%; box-sizing:border-box; resize:vertical;">${this.escHtml(registroImovel)}</textarea>
-              <p style="margin:6px 0 0; font-size:0.75rem; color:#64748b; line-height:1.4;">Entra no termo como {{REGISTRO_IMOVEL}}, no trecho do cartório, da empresa e do CNPJ. Exemplo: registrado no 1º Cartório de Registro de Imóveis da Comarca de Cerqueira César/SP, de propriedade da empresa Moura Leite Desenvolvimento &amp; Urbanização Ltda, inscrita no CNPJ sob o nº 01.066.134/0001-78.</p>
-            </div>
-
-            <hr style="border: 0; border-top: 1px solid #eee; margin: 5px 0;">
-            <h4 style="margin: 0; color: #334155; font-size: 0.95rem;">Automações de Cobrança</h4>
-            <div style="display: flex; align-items: center; gap: 15px;">
-                <div style="display: flex; align-items: center; gap: 8px;">
+            <div class="cce-split">
+              <div class="cce-card${parceiro ? " is-parceiro" : ""}">
+                <h4>Conta de parceria (pagamento)</h4>
+                <p>
+                  ${parceiro
+                    ? 'Este centro de custo é de <strong>parceiro</strong>. Os títulos a pagar dele saem por esta conta em Contas a Pagar, em Gerar Pagamento.'
+                    : 'Se informada, os títulos a pagar deste centro de custo saem por esta conta em Contas a Pagar, em Gerar Pagamento.'}
+                </p>
+                <select id="edit-conta-parceria-${id}" class="form-control" disabled>
+                  <option value="">Carregando contas correntes da empresa ${cc.idCompany || cc.companyId || ''}...</option>
+                </select>
+              </div>
+              <div class="cce-card">
+                <h4>Automações de cobrança</h4>
+                <div class="cce-auto">
+                  <div class="cce-check">
                     <input type="checkbox" id="edit-suspensiva-ativa-${id}" ${suspensiva_ativa ? 'checked' : ''} style="width: 16px; height: 16px;" onchange="document.getElementById('edit-suspensiva-dias-${id}').disabled = !this.checked">
-                    <label for="edit-suspensiva-ativa-${id}" style="font-weight: bold; font-size: 0.85rem; cursor: pointer; color: #b91c1c;">Habilitar Termo de Cláusula Suspensiva (Sinal)</label>
+                    <label for="edit-suspensiva-ativa-${id}" style="color:#b91c1c;">Habilitar termo de cláusula suspensiva (sinal)</label>
+                  </div>
+                  <div class="cce-check">
+                    <label for="edit-suspensiva-dias-${id}" style="font-weight:600; color:#64748b;">Dias pós-vencimento</label>
+                    <input type="number" id="edit-suspensiva-dias-${id}" class="form-control" style="width: 72px;" value="${suspensiva_dias}" ${!suspensiva_ativa ? 'disabled' : ''}>
+                  </div>
                 </div>
-                <div style="display: flex; align-items: center; gap: 8px;">
-                    <label for="edit-suspensiva-dias-${id}" style="font-size: 0.85rem; color: #64748b;">Dias pós-vencimento:</label>
-                    <input type="number" id="edit-suspensiva-dias-${id}" class="form-control" style="width: 70px; padding: 4px;" value="${suspensiva_dias}" ${!suspensiva_ativa ? 'disabled' : ''}>
-                </div>
+                <p style="margin-top:10px;">Vale somente para parcela <strong>SI (sinal)</strong> em atraso. Mensalidades e demais tipos seguem a régua normal, inclusive NEX 0%.</p>
+              </div>
             </div>
-            <p style="margin:0;font-size:0.75rem;color:#64748b;line-height:1.4;">Vale somente para parcela <strong>SI (sinal)</strong> em atraso. Mensalidades e demais tipos seguem a régua normal (NEX 0% inclusive).</p>
+
+            <div class="cce-reg">
+              <label class="cce-label" for="edit-registro-imovel-${id}">Registro do imóvel na autorização de escritura</label>
+              <textarea id="edit-registro-imovel-${id}" class="form-control" rows="5">${this.escHtml(registroImovel)}</textarea>
+              <p class="cce-hint">Entra no termo como {{REGISTRO_IMOVEL}}, no trecho do cartório, da empresa e do CNPJ. Exemplo: registrado no 1º Cartório de Registro de Imóveis da Comarca de Cerqueira César/SP, de propriedade da empresa Moura Leite Desenvolvimento &amp; Urbanização Ltda, inscrita no CNPJ sob o nº 01.066.134/0001-78.</p>
+            </div>
           </div>
-          <div style="padding: 16px 20px; border-top: 1px solid #eee; display: flex; justify-content: flex-end; gap: 10px; background: #f9f9f9; border-radius: 0 0 8px 8px;">
+          <div class="cce-foot">
             <button class="btn btn-cancel" onclick="CentrosCustoApp.closeModal()">Cancelar</button>
             <button class="btn btn-primary" onclick="CentrosCustoApp.saveCustom(${id})"><i data-lucide="save" style="width: 14px;"></i> Salvar</button>
           </div>
