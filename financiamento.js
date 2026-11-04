@@ -705,12 +705,17 @@ const FinanciamentoApp = {
         unit: this.formatUnidade(contract.unitName || contract.unityName || contract.unitId || ""),
         empId: contract.enterpriseId || contract.costCenterId || "",
         costCenterId: String(contract.costCenterId || contract.enterpriseId || ""),
+        enterpriseName: String(contract.enterpriseName || ""),
+        companyId: contract.companyId || contract.idCompany || "",
         unitName: String(contract.unitName || contract.unityName || contract.unitId || ""),
         startedAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),
         currentStageId: null,
         done: {}
       };
+      const obra = this.obraDoProc(proc);
+      if (obra.empreendimento !== "—") proc.enterpriseName = obra.empreendimento;
+      if (obra.empresa !== "—") proc.companyName = obra.empresa;
       this.saveProcess(proc);
     }
     FinanciamentoState.selected = { customerId, contractId, titulo, contractNumber, contract, customer };
@@ -808,17 +813,20 @@ const FinanciamentoApp = {
       #financiamento-root .fin-abas { margin: 0 0 14px; }
       #financiamento-root .fin-esteira-resumo { margin: 0 0 12px; color: #64748b; font-size: 0.84rem; }
       #financiamento-root .fin-esteira { display: flex; gap: 12px; overflow-x: auto; align-items: flex-start; padding-bottom: 8px; }
-      #financiamento-root .fin-col { flex: 0 0 280px; background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 12px; min-height: 180px; display: flex; flex-direction: column; max-height: calc(100vh - 220px); }
+      #financiamento-root .fin-col { flex: 0 0 300px; background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 12px; min-height: 180px; display: flex; flex-direction: column; max-height: calc(100vh - 220px); }
       #financiamento-root .fin-col-h { padding: 12px 12px 8px; border-bottom: 1px solid #e2e8f0; }
       #financiamento-root .fin-col-h strong { display: block; color: #0f172a; font-size: 0.84rem; line-height: 1.3; }
       #financiamento-root .fin-col-h span { color: #64748b; font-size: 0.75rem; }
       #financiamento-root .fin-col-lista { padding: 10px; overflow: auto; display: flex; flex-direction: column; gap: 8px; }
-      #financiamento-root .fin-card { text-align: left; width: 100%; border: 1px solid #e2e8f0; border-left: 4px solid #105436; background: #fff; border-radius: 10px; padding: 10px 12px; cursor: pointer; }
-      #financiamento-root .fin-card.is-atrasado { border-left-color: #b91c1c; }
+      #financiamento-root .fin-card { text-align: left; width: 100%; min-width: 0; border: 1px solid #e2e8f0; border-left: 4px solid #105436; background: #fff; border-radius: 10px; padding: 10px 12px; cursor: pointer; }
+      #financiamento-root .fin-card.is-atrasado { background: #fef2f2; border-color: #fecaca; border-left-color: #b91c1c; }
       #financiamento-root .fin-card.is-vence { border-left-color: #f37021; }
       #financiamento-root .fin-card.is-sem { border-left-color: #94a3b8; }
-      #financiamento-root .fin-card-nome { font-weight: 800; color: #0f172a; font-size: 0.84rem; }
-      #financiamento-root .fin-card-meta { color: #64748b; font-size: 0.75rem; margin-top: 2px; }
+      #financiamento-root .fin-card-nome { font-weight: 800; color: #0f172a; font-size: 0.84rem; line-height: 1.25; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+      #financiamento-root .fin-card-linha { display: flex; flex-direction: column; min-width: 0; margin-top: 6px; }
+      #financiamento-root .fin-card-linha span { font-size: 0.68rem; font-weight: 700; color: #64748b; }
+      #financiamento-root .fin-card-linha b { font-size: 0.78rem; font-weight: 700; color: #0f172a; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+      #financiamento-root .fin-card-meta { color: #64748b; font-size: 0.75rem; margin-top: 2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
       #financiamento-root .fin-pill { display: inline-block; margin-top: 8px; font-size: 0.72rem; font-weight: 800; border-radius: 999px; padding: 2px 8px; }
       #financiamento-root .fin-pill.is-ok { background: #dcfce7; color: #166534; }
       #financiamento-root .fin-pill.is-atrasado { background: #fee2e2; color: #991b1b; }
@@ -844,8 +852,20 @@ const FinanciamentoApp = {
     </section>`;
   },
 
+  obraDoProc(proc) {
+    const ccs = (window.AppState && (AppState.cachedCostCenters || AppState.costCenters)) || [];
+    const id = String((proc && (proc.costCenterId || proc.empId)) || "");
+    const cc = id ? ccs.find((c) => String(c.id) === id) : null;
+    const empreendimento = String((cc && cc.name) || (proc && proc.enterpriseName) || "").trim();
+    const companyId = (cc && (cc.idCompany != null ? cc.idCompany : cc.companyId)) || (proc && proc.companyId) || "";
+    let empresa = String((proc && proc.companyName) || "").trim();
+    if (!empresa && companyId && typeof window.getCompanyName === "function") empresa = String(window.getCompanyName(companyId, true) || "").trim();
+    return { empresa: empresa || "—", empreendimento: empreendimento || "—" };
+  },
+
   cardEsteiraHtml(row, etapa) {
     const proc = row.proc || {};
+    const obra = this.obraDoProc(proc);
     const prazo = this.prazoEtapa(proc, etapa);
     let cls = "is-sem";
     let pill = "Sem prazo";
@@ -867,10 +887,12 @@ const FinanciamentoApp = {
     const limite = prazo.limite ? (" · prazo " + this.fmtDate(prazo.limite)) : "";
     const safeKey = String(row.key).replace(/\\/g, "\\\\").replace(/'/g, "\\'");
     return `<button type="button" class="fin-card ${cls}" onclick="FinanciamentoApp.abrirAberto('${safeKey}')">
-      <div class="fin-card-nome">${this.esc(proc.customerName || proc.customerId || "—")}</div>
-      <div class="fin-card-meta">Contrato ${this.esc(proc.contractNumber || proc.contractId || "—")} · Título ${this.esc(proc.titulo || "—")}</div>
+      <div class="fin-card-nome" title="${this.esc(proc.customerName || "")}">${this.esc(proc.customerName || proc.customerId || "—")}</div>
+      <div class="fin-card-linha" title="${this.esc(obra.empresa)}"><span>Empresa</span><b>${this.esc(obra.empresa)}</b></div>
+      <div class="fin-card-linha" title="${this.esc(obra.empreendimento)}"><span>Empreendimento</span><b>${this.esc(obra.empreendimento)}</b></div>
+      <div class="fin-card-meta" title="${this.esc("Contrato " + (proc.contractNumber || proc.contractId || "—") + " · Título " + (proc.titulo || "—"))}">Contrato ${this.esc(proc.contractNumber || proc.contractId || "—")} · Título ${this.esc(proc.titulo || "—")}</div>
       <div class="fin-card-meta">${this.esc(this.formatUnidade(proc.unit || "—"))}</div>
-      <div class="fin-card-meta">${this.esc(quando + limite)}</div>
+      <div class="fin-card-meta" title="${this.esc(quando + limite)}">${this.esc(quando + limite)}</div>
       ${this.notaCardHtml(proc, etapa)}
       <span class="fin-pill ${cls}">${this.esc(pill)}</span>
     </button>`;

@@ -932,16 +932,15 @@ const GerarPagamentoApp = {
     if (bar) bar.style.width = Math.max(2, Math.min(99, Math.round(pct * 100))) + "%";
   },
 
-  FRASES_CARGA: ["Buscando títulos", "Checando lotes", "Conferindo boletos", "Analisando notas", "Conferindo rateios"],
+  FRASES_CARGA: ["Buscando os títulos", "Checando lotes", "Conferindo boletos", "Analisando notas", "Conferindo rateios"],
 
   /* Círculo, frase da etapa e barra. Sem contagem de títulos e sem tempo decorrido. */
   carregandoHtml() {
-    return `<div style="display:flex;flex-direction:column;align-items:center;gap:12px;width:100%;max-width:400px;margin:0 auto;padding:40px 0;color:var(--color-text-muted);">
-        <div class="loading-spinner" style="width:32px;height:32px;border:3px solid rgba(16,84,54,0.15);border-top-color:var(--color-primary);border-radius:50%;animation:spin 0.8s linear infinite;"></div>
-        <span id="gp-progresso" class="loading-status-text" style="font-weight:500;">${this.esc(this.state.progresso)}</span>
-        <div style="width:100%;background:#e2e8f0;border-radius:8px;height:10px;overflow:hidden;margin-top:5px;">
-          <div id="gp-progresso-barra" class="loading-progress-bar" style="width:${Math.max(2, Math.round((this.state.progressoPct || 0) * 100))}%;height:100%;background:#10b981;transition:width 0.4s linear;"></div>
-        </div>
+    const pct = Math.max(8, Math.min(92, Math.round((this.state.progressoPct || 0) * 100)));
+    return `<div class="ml-load">
+        <div class="loading-spinner" aria-hidden="true"></div>
+        <div id="gp-progresso" class="loading-status-text">${this.esc(this.state.progresso || "Buscando os títulos")}</div>
+        <div class="ml-load-track"><div id="gp-progresso-barra" class="loading-progress-bar" style="width:${pct}%"></div></div>
       </div>`;
   },
 
@@ -1070,6 +1069,14 @@ const GerarPagamentoApp = {
     const movs = pay && pay.bankMovements;
     const lista = Array.isArray(movs) ? movs : (movs ? [movs] : []);
     return lista.reduce((t, bm) => t + (n(bm && (bm.bankMovementAmount != null ? bm.bankMovementAmount : bm.amount)) || 0), 0);
+  },
+
+  /** Baixa de verdade na parcela: pagamento com valor ou data. Saldo zerado, sem essa baixa, não conta. */
+  parcelaComBaixa(p) {
+    if (!p || typeof p !== "object") return false;
+    const pays = Array.isArray(p.payments) ? p.payments : (p.payments ? [p.payments] : []);
+    if (pays.some((pay) => this.baixaQuita(pay) && (this.valorBaixa(pay) > 0.009 || !!(pay && (pay.paymentDate || pay.payOffDate || pay.date))))) return true;
+    return !!(p.paymentDate || p.payOffDate || p.dischargeDate || p.settlementDate);
   },
 
   /** Parcela do GET /bills/{id}/installments já paga, como a situação PG ou a baixa da consulta do Sienge. */
@@ -1202,15 +1209,14 @@ const GerarPagamentoApp = {
       });
       const original = Number(bill.originalAmount) || 0;
       let saldo = app.billBalance(bill);
-      const quitou = original > 0.009 && quitadoPorBaixa >= original - 0.02 && temBaixa;
-      if (quitou) {
-        pago = true;
-        saldo = 0;
-      } else if (temBaixa && saldo != null && saldo <= 0.009) {
-        pago = true;
-      } else if (!temBaixa) {
+      const temConta = movs.length > 0;
+      const quitou = temConta && original > 0.009 && quitadoPorBaixa >= original - 0.02 && temBaixa;
+      if (!temConta) {
         pago = false;
         if (saldo != null && saldo <= 0.009) saldo = null;
+      } else if (quitou || pago || (saldo != null && saldo <= 0.009)) {
+        pago = true;
+        if (saldo != null && saldo <= 0.009) saldo = 0;
       }
       const ccsTitulo = [];
       lista(bill.paymentsCategories).forEach((c) => {
@@ -1341,7 +1347,7 @@ const GerarPagamentoApp = {
           (parcelas || []).forEach((p) => {
             const num = p.installmentId != null ? p.installmentId : p.installmentNumber;
             if (num == null) return;
-            if (this.parcelaQuitada(p)) this.marcarParcelaPaga(billId, this.numerosParcela(p));
+            if (this.parcelaComBaixa(p)) this.marcarParcelaPaga(billId, this.numerosParcela(p));
             s.formaSienge[this.chaveTitulo(billId, num)] = {
               tipo: String(p.paymentType || ""),
               tipoId: p.paymentTypeId != null ? String(p.paymentTypeId) : "",
@@ -3823,23 +3829,36 @@ const GerarPagamentoApp = {
       .filter((l) => !emp || this.empresaDoGrupo({ empresaConta: l.empresaConta, itens: l.itens || [] }) === emp)
       .sort((a, b) => String(b.criadoEm).localeCompare(String(a.criadoEm)));
     const alerta = this.retroAlertaHtml(diasRetro);
-    if (s.diaRetro) {
+    const nAGerar = aGerar.filter((g) => g.key !== "__sem").length;
+    const nGerados = s.lotes.filter(loteNoPeriodo).length;
+    const aba = s.abaLotes === "gerados" ? "gerados" : "gerar";
+    const abasLote = `<div class="ml-tabs gp-abas-lotes" role="tablist">
+      <button type="button" role="tab" aria-selected="${aba === "gerar"}" class="ml-tab${aba === "gerar" ? " is-active" : ""}" onclick="GerarPagamentoApp.setAbaLotes('gerar')"><i data-lucide="layers"></i> Lotes a gerar <span class="ml-tab-count">${nAGerar}</span></button>
+      <button type="button" role="tab" aria-selected="${aba === "gerados"}" class="ml-tab${aba === "gerados" ? " is-active" : ""}" onclick="GerarPagamentoApp.setAbaLotes('gerados')"><i data-lucide="check-circle-2"></i> Lotes gerados <span class="ml-tab-count">${nGerados}</span></button>
+    </div>`;
+    let corpo;
+    if (aba === "gerados") {
+      corpo = this.painelLotesHtml(gerados);
+    } else if (s.diaRetro) {
       const titulosRetro = retroVis.reduce((t, g) => t + g.itens.length, 0);
       const totalRetro = retroVis.reduce((t, g) => t + g.itens.reduce((s2, it) => s2 + this.valorPagar(it), 0), 0);
-      return `${faixa()}${alerta}${this.resumoAGerarHtml(retroVis)}
+      corpo = `${faixa()}${alerta}
         <div class="gp-retro-vendo">
           <span><i data-lucide="history" style="width:15px;height:15px;"></i> Pendências de <strong>${this.dataBr(s.diaRetro)}</strong>, antes do período buscado · ${titulosRetro} título(s) · ${this.money(totalRetro)}</span>
           <button type="button" class="btn btn-outline btn-sm" onclick="GerarPagamentoApp.setDiaRetro('')"><i data-lucide="arrow-left" style="width:14px;height:14px;"></i> Voltar ao período ${this.dataBr(s.startDate)}${s.endDate !== s.startDate ? " a " + this.dataBr(s.endDate) : ""}</button>
         </div>
+        ${this.resumoAGerarHtml(retroVis)}
         <div class="gp-lotes-painel" style="margin-top:0;">${retroVis.map(card).join("")}</div>`;
+    } else {
+      const vazioPeriodo = this.state.titulos.some((r) => noPeriodo(String(r.vencimento || "").slice(0, 10)) && !r.pago && r.aPagar > 0.009)
+        ? "Nenhum título a gerar lote nesta empresa no período: todos já estão em lote."
+        : "Nenhum título em aberto com vencimento no período buscado.";
+      const blocoAGerar = this.resumoAGerarHtml(aGerarVis) + (aGerarVis.length
+        ? `<div class="gp-lotes-painel" style="margin-top:0;">${aGerarVis.map(card).join("")}</div>`
+        : vazio(vazioPeriodo));
+      corpo = `${faixa()}${alerta}${blocoAGerar}`;
     }
-    const vazioPeriodo = this.state.titulos.some((r) => noPeriodo(String(r.vencimento || "").slice(0, 10)) && !r.pago && r.aPagar > 0.009)
-      ? "Nenhum título a gerar lote nesta empresa no período: todos já estão em lote."
-      : "Nenhum título em aberto com vencimento no período buscado.";
-    const blocoAGerar = this.resumoAGerarHtml(aGerarVis) + (aGerarVis.length
-      ? `<div class="gp-lotes-painel" style="margin-top:0;">${aGerarVis.map(card).join("")}</div>`
-      : vazio(vazioPeriodo));
-    return `${this.conferenciaHtml()}${faixa()}${alerta}${blocoAGerar}${this.painelLotesHtml(gerados)}`;
+    return `${this.conferenciaHtml()}${abasLote}${corpo}`;
   },
 
   grupoStatus(r) {
@@ -4496,9 +4515,10 @@ const GerarPagamentoApp = {
     const s = this.state;
     const busy = s.consultando;
     const body = s.loading
-      ? `<div style="display:flex;flex-direction:column;align-items:center;gap:12px;padding:40px 0;color:var(--color-text-muted);">
-          <div class="loading-spinner" style="width:32px;height:32px;border:3px solid rgba(16,84,54,0.15);border-top-color:var(--color-primary);border-radius:50%;animation:spin 0.8s linear infinite;"></div>
-          <span style="font-weight:500;">Carregando centros de custo de parceiro…</span>
+      ? `<div class="ml-load">
+          <div class="loading-spinner" aria-hidden="true"></div>
+          <div class="loading-status-text">Buscando os títulos</div>
+          <div class="ml-load-track"><div class="loading-progress-bar" style="width:8%;animation:com-vel-carga 12s ease-out forwards;"></div></div>
         </div>`
       : (s.error
         ? `<div class="crm-card" style="padding:20px;color:#b91c1c;">${this.esc(s.error)}</div>`
@@ -4541,6 +4561,7 @@ const GerarPagamentoApp = {
           #gerar-pagamento-root .gp-acerto li { margin:4px 0; }
           #gerar-pagamento-root .gp-acerto-mini { color:#c2410c; font-weight:600; }
           #gerar-pagamento-root .gp-abas-lote { margin:0; }
+          #gerar-pagamento-root .gp-abas-lotes { margin:12px 16px 0; }
           #gerar-pagamento-root .gp-faixa { display:flex; flex-wrap:wrap; align-items:flex-end; gap:8px 16px; margin:8px 20px 4px; }
           #gerar-pagamento-root .gp-abas-empresa { margin:0; flex:1 1 100%; }
           #gerar-pagamento-root .ml-tab.gp-tab-pend { color:#a16207; background:#fef9c3; border-radius:8px 8px 0 0; }
