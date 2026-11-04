@@ -46819,11 +46819,16 @@ async function loadRenegotiationHistory(customerId, saleId) {
 // ----------------------------------------------------------------------
 // Aba: Vizinhos Confrontantes
 // ----------------------------------------------------------------------
+/* Espaço entre o código do empreendimento e a unidade some. O zero à esquerda do lote também: 12400 - B-024 e 12400-b-24 são o mesmo lote. */
 window.normKmzLotKey = function(s) {
   return String(s || "")
     .toLowerCase()
     .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "")
+    .replace(/(\d+)/g, function(n) {
+      const semZero = n.replace(/^0+/, "");
+      return semZero || "0";
+    })
     .replace(/[^a-z0-9]/g, "");
 };
 
@@ -52770,6 +52775,17 @@ window.syncGlobalConfigFromFirebase = async function() {
                     }
                     return;
                 }
+                if (k === "crm_moura_financiamentos_proc" && typeof window.mergeFinanciamentosProc === "function") {
+                    const merged = window.mergeFinanciamentosProc(localStorage.getItem(k), globalData[k] || "{}");
+                    if (merged && merged !== (localStorage.getItem(k) || "")) {
+                        _originalSetItem.call(localStorage, k, merged);
+                        changed = true;
+                    }
+                    if (merged && merged !== "{}" && merged !== (globalData[k] || "") && window.forceUploadLocalConfig) {
+                        setTimeout(() => window.forceUploadLocalConfig(true), 1500);
+                    }
+                    return;
+                }
                 if (globalData[k] && globalData[k] !== localStorage.getItem(k)) {
                     if (k === "crm_plano_visoes_v2") {
                         const merged = window.mergePlanoVisoes(localStorage.getItem(k), globalData[k]);
@@ -52981,6 +52997,13 @@ window.forceUploadLocalConfig = async function(silent = true) {
         try {
           const snap = await window.firebaseCollections.getDoc(docRef);
           const cloud = snap && (typeof snap.exists === "function" ? snap.exists() : snap.exists) ? (snap.data() || {}) : {};
+          if (typeof window.mergeFinanciamentosProc === "function") {
+            const mergedProc = window.mergeFinanciamentosProc(payload.crm_moura_financiamentos_proc || "{}", cloud.crm_moura_financiamentos_proc || "{}");
+            if (mergedProc && mergedProc !== "{}") {
+              payload.crm_moura_financiamentos_proc = mergedProc;
+              try { _originalSetItem.call(localStorage, "crm_moura_financiamentos_proc", mergedProc); } catch (e) {}
+            }
+          }
           if (payload.crm_plano_visoes_v2 && cloud.crm_plano_visoes_v2) {
             payload.crm_plano_visoes_v2 = window.mergePlanoVisoes(payload.crm_plano_visoes_v2, cloud.crm_plano_visoes_v2);
           } else if (!payload.crm_plano_visoes_v2 && cloud.crm_plano_visoes_v2) {
@@ -53348,6 +53371,13 @@ localStorage.setItem = function(key, value) {
                     try {
                       const snap = await window.firebaseCollections.getDoc(docRef);
                       const cloud = snap && snap.exists() ? (snap.data() || {}) : {};
+                      if (typeof window.mergeFinanciamentosProc === "function") {
+                        const mergedProc = window.mergeFinanciamentosProc(payload.crm_moura_financiamentos_proc || "{}", cloud.crm_moura_financiamentos_proc || "{}");
+                        if (mergedProc && mergedProc !== "{}") {
+                          payload.crm_moura_financiamentos_proc = mergedProc;
+                          try { _originalSetItem.call(localStorage, "crm_moura_financiamentos_proc", mergedProc); } catch (e) {}
+                        }
+                      }
                       if (payload.crm_plano_visoes_v2 && cloud.crm_plano_visoes_v2) {
                         payload.crm_plano_visoes_v2 = window.mergePlanoVisoes(payload.crm_plano_visoes_v2, cloud.crm_plano_visoes_v2);
                       } else if (!payload.crm_plano_visoes_v2 && cloud.crm_plano_visoes_v2) {

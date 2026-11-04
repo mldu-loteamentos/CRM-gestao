@@ -57,6 +57,7 @@ const FinanciamentoApp = {
   },
 
   setPainel(id) {
+    if (FinanciamentoState.process) this.saveProcess(FinanciamentoState.process);
     FinanciamentoState.painel = id === "esteira" ? "esteira" : "pesquisa";
     FinanciamentoState.view = "busca";
     this.render();
@@ -578,7 +579,7 @@ const FinanciamentoApp = {
   loadAllProcesses() {
     try {
       const obj = JSON.parse(localStorage.getItem(FIN_PROC_KEY) || "{}") || {};
-      return obj && typeof obj === "object" ? obj : {};
+      return obj && typeof obj === "object" && !Array.isArray(obj) ? obj : {};
     } catch (e) {
       return {};
     }
@@ -594,6 +595,14 @@ const FinanciamentoApp = {
 
   listOpenProcesses() {
     const all = this.loadAllProcesses();
+    const mem = FinanciamentoState.process;
+    if (mem && mem.customerId && mem.contractId) {
+      const key = this.procKey(mem.customerId, mem.contractId);
+      const saved = all[key];
+      const tm = Date.parse(mem.updatedAt || mem.startedAt || 0) || 0;
+      const ts = Date.parse((saved && (saved.updatedAt || saved.startedAt)) || 0) || 0;
+      if (!saved || tm >= ts) all[key] = mem;
+    }
     return Object.keys(all).map((key) => {
       const proc = all[key];
       if (!proc || typeof proc !== "object") return null;
@@ -673,6 +682,7 @@ const FinanciamentoApp = {
   },
 
   saveProcess(proc) {
+    if (!proc || proc.customerId == null || proc.contractId == null) return;
     const all = this.loadAllProcesses();
     all[this.procKey(proc.customerId, proc.contractId)] = proc;
     localStorage.setItem(FIN_PROC_KEY, JSON.stringify(all));
@@ -710,6 +720,7 @@ const FinanciamentoApp = {
   },
 
   voltarBusca() {
+    if (FinanciamentoState.process) this.saveProcess(FinanciamentoState.process);
     FinanciamentoState.view = "busca";
     FinanciamentoState.process = null;
     this.render();
@@ -814,6 +825,7 @@ const FinanciamentoApp = {
       #financiamento-root .fin-pill.is-vence { background: #ffedd5; color: #9a3412; }
       #financiamento-root .fin-pill.is-sem { background: #f1f5f9; color: #475569; }
       #financiamento-root .fin-col-vazia { color: #94a3b8; font-size: 0.78rem; padding: 8px 2px; }
+      #financiamento-root .fin-card-nota { color: #334155; font-size: 0.75rem; margin-top: 6px; line-height: 1.35; }
     </style>
     ${resumo}${vazioEtapas}
     <div class="fin-esteira">${colunas.map((col) => this.colunaHtml(col)).join("")}</div>`;
@@ -859,6 +871,7 @@ const FinanciamentoApp = {
       <div class="fin-card-meta">Contrato ${this.esc(proc.contractNumber || proc.contractId || "—")} · Título ${this.esc(proc.titulo || "—")}</div>
       <div class="fin-card-meta">${this.esc(this.formatUnidade(proc.unit || "—"))}</div>
       <div class="fin-card-meta">${this.esc(quando + limite)}</div>
+      ${this.notaCardHtml(proc, etapa)}
       <span class="fin-pill ${cls}">${this.esc(pill)}</span>
     </button>`;
   },
@@ -1078,12 +1091,46 @@ const FinanciamentoApp = {
   marcarEtapa(stageId) {
     const proc = FinanciamentoState.process;
     if (!proc) return;
+    const mesma = String(proc.currentStageId || "") === String(stageId);
     proc.currentStageId = stageId;
     proc.done = proc.done || {};
-    proc.done[stageId] = new Date().toISOString();
+    if (!mesma || !proc.done[stageId]) proc.done[stageId] = new Date().toISOString();
     proc.updatedAt = new Date().toISOString();
     this.saveProcess(proc);
+    FinanciamentoState.process = proc;
     this.render();
+  },
+
+  notaDe(proc, stageId) {
+    const notas = proc && proc.notas;
+    if (!notas || !stageId) return null;
+    return notas[stageId] || notas[String(stageId)] || null;
+  },
+
+  notaCardHtml(proc, etapa) {
+    const nota = this.notaDe(proc, etapa && etapa.id);
+    if (!nota || (!nota.texto && !nota.data)) return "";
+    const quando = nota.data ? this.fmtDate(nota.data) : "";
+    const texto = String(nota.texto || "").replace(/\s+/g, " ").trim();
+    const linha = quando && texto ? (quando + " · " + texto) : (quando || texto);
+    return `<div class="fin-card-nota">${this.esc(linha)}</div>`;
+  },
+
+  salvarNota(stageId) {
+    const proc = FinanciamentoState.process;
+    if (!proc) return;
+    const textoEl = document.getElementById("fin-nota-" + stageId);
+    const dataEl = document.getElementById("fin-nota-data-" + stageId);
+    const st = document.getElementById("fin-nota-st-" + stageId);
+    const texto = textoEl ? String(textoEl.value || "").trim() : "";
+    const data = dataEl ? String(dataEl.value || "").slice(0, 10) : "";
+    proc.notas = proc.notas || {};
+    if (!texto && !data) delete proc.notas[stageId];
+    else proc.notas[stageId] = { texto: texto, data: data, em: new Date().toISOString() };
+    proc.updatedAt = new Date().toISOString();
+    this.saveProcess(proc);
+    FinanciamentoState.process = proc;
+    if (st) st.textContent = "Nota salva nesta fase.";
   },
 
   fluxoHtml() {
@@ -1120,14 +1167,35 @@ const FinanciamentoApp = {
           <h3 style="margin:0;font-size:1.05rem;color:var(--color-primary);">Etapas do financiamento</h3>
         </div>
         <div class="crm-card-content">
-          <p style="margin:0 0 12px;color:#64748b;font-size:0.82rem;">Em cada fase, escolha a tag e envie o arquivo. Ele sobe na hora para a unidade no Sienge.</p>
+          <style>
+            #financiamento-root .fin-nota { margin-top: 10px; }
+            #financiamento-root .fin-nota label { display: block; font-size: 0.72rem; font-weight: 700; color: #64748b; margin-bottom: 4px; }
+            #financiamento-root .fin-nota textarea { width: 100%; box-sizing: border-box; border: 1px solid #cbd5e1; border-radius: 8px; padding: 8px; font: inherit; background: #fff; min-height: 64px; resize: vertical; }
+            #financiamento-root .fin-nota-linha { display: flex; gap: 8px; align-items: flex-end; flex-wrap: wrap; margin-top: 8px; }
+            #financiamento-root .fin-nota input[type="date"] { height: 36px; border: 1px solid #cbd5e1; border-radius: 8px; padding: 0 8px; background: #fff; font: inherit; }
+            #financiamento-root .fin-nota-st { margin: 0; color: #105436; font-size: 0.78rem; font-weight: 700; }
+          </style>
+          <p style="margin:0 0 12px;color:#64748b;font-size:0.82rem;">Em cada fase dá para registrar uma nota interna e a data. O arquivo, com a tag escolhida, sobe na hora para a unidade no Sienge.</p>
           ${!etapas.length ? '<p style="color:#64748b;">Nenhuma etapa cadastrada. Vá em Configurações → Etapas Financiamento.</p>' : etapas.map((s) => {
             const done = proc.done && proc.done[s.id];
             const isCurrent = String(current) === String(s.id);
             const bg = isCurrent ? "#ecfdf5" : (done ? "#f8fafc" : "#fff");
             const border = isCurrent ? "#86efac" : "#e2e8f0";
             const sid = String(s.id).replace(/'/g, "");
+            const nota = this.notaDe(proc, s.id) || {};
             const enviados = ((proc.anexos && proc.anexos[s.id]) || []).map((a) => `<li>${this.esc(a.tag)} · ${this.esc(a.fileName)} · ${this.esc(this.fmtDate(a.em))}</li>`).join("");
+            const notaHtml = `<div class="fin-nota">
+              <label for="fin-nota-${sid}">Nota interna</label>
+              <textarea id="fin-nota-${sid}" rows="2" placeholder="Ex.: termo enviado pela Allanis no ticket de orientações">${this.esc(nota.texto || "")}</textarea>
+              <div class="fin-nota-linha">
+                <div>
+                  <label for="fin-nota-data-${sid}">Data</label>
+                  <input type="date" id="fin-nota-data-${sid}" value="${this.esc(String(nota.data || "").slice(0, 10))}">
+                </div>
+                <button type="button" class="btn btn-primary btn-sm" onclick="FinanciamentoApp.salvarNota('${sid}')">Salvar nota</button>
+                <p id="fin-nota-st-${sid}" class="fin-nota-st"></p>
+              </div>
+            </div>`;
             const anexo = s.hasChildren ? "" : `<div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-top:10px;">
               <input type="file" id="fin-arq-${sid}" style="max-width:240px;font-size:0.8rem;">
               <select id="fin-tag-${sid}" class="fin-tag form-control" style="max-width:240px;height:36px;"><option value="">Carregando tags…</option></select>
@@ -1139,11 +1207,12 @@ const FinanciamentoApp = {
               <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;">
                 <div>
                   <div style="font-weight:700;color:#0f172a;">${this.esc(s.label || s.nome)}</div>
-                  <div style="font-size:0.78rem;color:#64748b;">${s.dias || 0} dias${done ? " · concluída em " + this.fmtDate(done) : ""}</div>
+                  <div style="font-size:0.78rem;color:#64748b;">${s.dias || 0} dias${done ? " · desde " + this.fmtDate(done) : ""}</div>
                 </div>
                 ${s.hasChildren ? "" : `<button type="button" class="btn ${isCurrent ? "btn-outline" : "btn-primary"} btn-sm" onclick="FinanciamentoApp.marcarEtapa('${sid}')">${isCurrent ? "Etapa atual" : "Marcar etapa"}</button>`}
               </div>
               ${anexo}
+              ${notaHtml}
             </div>`;
           }).join("")}
         </div>
@@ -1152,6 +1221,77 @@ const FinanciamentoApp = {
 };
 
 window.FinanciamentoApp = FinanciamentoApp;
+
+/* Junta os financiamentos deste navegador com os da nuvem. Fica o registro mais novo de cada contrato, sem apagar o outro. */
+window.mergeFinanciamentosProc = function(localRaw, cloudRaw) {
+  const ler = (raw) => {
+    try {
+      const o = JSON.parse(raw || "{}");
+      return o && typeof o === "object" && !Array.isArray(o) ? o : {};
+    } catch (e) {
+      return {};
+    }
+  };
+  const unirLista = (a, b) => {
+    const out = [];
+    const visto = {};
+    [a, b].forEach((lista) => {
+      (Array.isArray(lista) ? lista : []).forEach((item) => {
+        if (!item || typeof item !== "object") return;
+        const chave = String(item.fileName || "") + "|" + String(item.em || "");
+        if (visto[chave]) return;
+        visto[chave] = true;
+        out.push(item);
+      });
+    });
+    return out;
+  };
+  const unirMapa = (antigo, novo, porData) => {
+    const out = Object.assign({}, antigo || {});
+    Object.keys(novo || {}).forEach((id) => {
+      const a = out[id];
+      const b = novo[id];
+      if (Array.isArray(a) || Array.isArray(b)) {
+        out[id] = unirLista(a, b);
+        return;
+      }
+      if (porData && a && b && typeof a === "object" && typeof b === "object") {
+        const ta = Date.parse(a.em || 0) || 0;
+        const tb = Date.parse(b.em || 0) || 0;
+        out[id] = tb >= ta ? b : a;
+        return;
+      }
+      if (porData && a && b && typeof a !== "object") {
+        out[id] = String(a) <= String(b) ? a : b;
+        return;
+      }
+      out[id] = b;
+    });
+    return out;
+  };
+  const local = ler(localRaw);
+  const cloud = ler(cloudRaw);
+  const chaves = {};
+  Object.keys(local).forEach((k) => { chaves[k] = true; });
+  Object.keys(cloud).forEach((k) => { chaves[k] = true; });
+  const out = {};
+  Object.keys(chaves).sort().forEach((k) => {
+    const a = local[k];
+    const b = cloud[k];
+    if (!a || typeof a !== "object") { if (b) out[k] = b; return; }
+    if (!b || typeof b !== "object") { out[k] = a; return; }
+    const ta = Date.parse(a.updatedAt || a.startedAt || 0) || 0;
+    const tb = Date.parse(b.updatedAt || b.startedAt || 0) || 0;
+    const recente = tb > ta ? b : a;
+    const antigo = recente === a ? b : a;
+    const junto = Object.assign({}, antigo, recente);
+    junto.done = unirMapa(antigo.done, recente.done, true);
+    junto.anexos = unirMapa(antigo.anexos, recente.anexos, false);
+    junto.notas = unirMapa(antigo.notas, recente.notas, true);
+    out[k] = junto;
+  });
+  return JSON.stringify(out);
+};
 
 document.addEventListener("tabChanged", (e) => {
   if (e.detail === "financiamento") FinanciamentoApp.init();
