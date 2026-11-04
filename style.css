@@ -11993,10 +11993,18 @@ tr.pr-liberado td { background: #f7faf8; }
 .eho-op h4 { margin: 0 0 8px; color: #105436; font-size: 0.95rem; }
 .eho-datas { display: flex; flex-wrap: wrap; gap: 8px; align-items: flex-end; }
 .eho-datas label { display: flex; flex-direction: column; gap: 4px; font-size: 0.72rem; font-weight: 700; color: #64748b; }
-.eho-datas input { height: 36px; border: 1px solid #cbd5e1; border-radius: 8px; padding: 0 8px; font-size: 0.85rem; }
+.eho-datas input, .eho-datas select { height: 36px; border: 1px solid #cbd5e1; border-radius: 8px; padding: 0 8px; font-size: 0.85rem; background: #fff; }
 .eho-periodos { display: flex; flex-direction: column; gap: 6px; margin-top: 10px; }
-.eho-periodo { display: flex; align-items: center; justify-content: space-between; gap: 8px; font-size: 0.82rem; color: #334155; }
-.eho-vazio, .eho-ferias { color: #94a3b8; font-size: 0.8rem; }
+.eho-periodo { display: flex; align-items: center; gap: 8px; font-size: 0.82rem; color: #334155; }
+.eho-periodo > span:not(.eho-chip) { flex: 1; }
+.eho-vazio, .eho-ferias, .eho-sem { color: #94a3b8; font-size: 0.8rem; }
+.eho-legenda, .eho-ausencias { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.eho-legenda { margin: 0 0 12px; }
+.eho-chip { display: inline-flex; align-items: center; border-radius: 999px; padding: 2px 8px; font-size: 0.75rem; font-weight: 700; white-space: nowrap; }
+.eho-chip-ferias { background: #dbeafe; color: #1d4ed8; }
+.eho-chip-atestado { background: #ffedd5; color: #c2410c; }
+.eho-chip-dayoff { background: #f3e8ff; color: #7e22ce; }
+.eho-chip-emenda { background: #fef9c3; color: #a16207; }
 .eho-status { min-height: 1.2em; margin: 8px 0 0; font-size: 0.8rem; color: #105436; }
 .eho-tabela { width: 100%; border-collapse: collapse; font-size: 0.84rem; margin-bottom: 8px; }
 .eho-tabela th { background: #105436; color: #fff; text-align: left; padding: 8px 10px; font-weight: 700; }
@@ -12004,6 +12012,11 @@ tr.pr-liberado td { background: #f7faf8; }
 .eho-tabela tbody tr.is-meu { background: #ecfdf3; }
 .eho-tabela tbody tr.eho-clicavel { cursor: pointer; }
 .eho-tabela tbody tr.eho-clicavel:hover { background: #f0fdf4; }
+.eho-tabela tbody tr.eho-aus-ferias { background: #eff6ff; }
+.eho-tabela tbody tr.eho-aus-atestado { background: #fff7ed; }
+.eho-tabela tbody tr.eho-aus-dayoff { background: #faf5ff; }
+.eho-tabela tbody tr.eho-aus-emenda { background: #fefce8; }
+.eho-tabela tbody tr.eho-aus-mista { background: #f8fafc; }
 .eho-eu { color: #105436; }
 .eho-tabela tbody tr.is-meu td:first-child { box-shadow: inset 3px 0 0 #105436; }
 .eho-troca { position: fixed; inset: 0; z-index: 8100; background: rgba(15, 23, 42, 0.45); display: flex; align-items: center; justify-content: center; padding: 24px; }
@@ -12078,4 +12091,33 @@ tr.pr-liberado td { background: #f7faf8; }
 @media (max-width: 860px) {
   .cce-grid, .cce-split { grid-template-columns: 1fr; }
 }
+
+.cem-intro { margin: 0 0 14px; max-width: 820px; color: #64748b; font-size: 0.85rem; line-height: 1.45; }
+.cem-tabs { margin-bottom: 16px; }
+.cem-topo { display: flex; justify-content: flex-end; margin-bottom: 12px; }
+.cem-tabela { width: 100%; border-collapse: collapse; font-size: 0.84rem; margin-bottom: 16px; }
+.cem-tabela th { background: #105436; color: #fff; text-align: left; padding: 8px 10px; font-weight: 700; }
+.cem-tabela td { padding: 8px 10px; border-bottom: 1px solid #e2e8f0; vertical-align: middle; }
+.cem-tabela th.is-right, .cem-tabela td.is-right, .cem-acoes { text-align: right; white-space: nowrap; width: 108px; }
+.cem-vazio { margin: 8px 0 0; color: #64748b; font-size: 0.85rem; }
+.cem-bloco h4 { margin: 8px 0 4px; color: #105436; font-size: 0.95rem; }
+.cem-bloco p { margin: 0 0 8px; color: #64748b; font-size: 0.8rem; }
+.cem-modal { position: fixed; inset: 0; z-index: 8200; background: rgba(15, 23, 42, 0.45); display: flex; align-items: center; justify-content: center; padding: 24px; }
+.cem-card { width: min(860px, 100%); max-height: 92vh; overflow: auto; background: #fff; border-radius: 16px; box-shadow: 0 20px 50px rgba(15, 23, 42, 0.25); }
+.cem-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 16px 18px 0; }
+.cem-head h3 { margin: 0; color: #105436; font-size: 1.05rem; }
+.cem-body { padding: 14px 18px 18px; }
+.cem-foot { display: flex; justify-content: flex-end; padding: 0 18px 18px; }
+.cem-grade { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.cem-grade label, .cem-bloco-campo, .cem-retorno { display: flex; flex-direction: column; gap: 4px; font-size: 0.72rem; font-weight: 700; color: #64748b; }
+.cem-campo, .cem-retorno input { height: 36px; border: 1px solid #cbd5e1; border-radius: 8px; padding: 0 8px; font-size: 0.85rem; background: #fff; color: #0f172a; font-weight: 500; }
+textarea.cem-campo { height: auto; min-height: 180px; padding: 8px; line-height: 1.45; resize: vertical; }
+.cem-liga { margin: 12px 0; }
+.cem-vars { display: flex; flex-wrap: wrap; gap: 6px; align-items: flex-end; margin: 4px 0 10px; }
+.cem-var { border: 1px solid #bbf7d0; background: #f0fdf4; color: #105436; border-radius: 999px; padding: 6px 10px; font-size: 0.75rem; font-weight: 700; cursor: pointer; }
+.cem-retorno input { width: 72px; }
+.cem-legenda { margin: 8px 0; color: #64748b; font-size: 0.75rem; }
+.cem-previa { margin: 0; white-space: pre-wrap; background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 10px; padding: 12px; color: #1e293b; font-family: inherit; font-size: 0.85rem; line-height: 1.45; }
+.cem-aviso { margin: 0 0 10px; color: #b45309; font-size: 0.8rem; }
+@media (max-width: 720px) { .cem-grade { grid-template-columns: 1fr; } }
 

@@ -187,13 +187,23 @@ const DashboardInadimplencia = (function() {
     return Number(c.overdueValue != null ? c.overdueValue : c.value) || 0;
   }
 
-  /** Cada linha da fila = 1 título (contrato/bill). billCount/titles costumam ser parcelas. */
-  function clientTitles(c) {
-    if (!c) return 1;
+  /** Soma títulos sem contar o mesmo billId duas vezes, como o KPI da fila. */
+  function takeNewTitles(c, seen) {
+    if (!c) return 0;
     if (Array.isArray(c.billIds) && c.billIds.length) {
-      const uniq = new Set(c.billIds.map((id) => String(id || '').replace(/^B-/, '').split('-')[0]).filter(Boolean));
-      if (uniq.size) return uniq.size;
+      let n = 0;
+      c.billIds.forEach((id) => {
+        if (id == null || id === '') return;
+        const k = String(id);
+        if (seen.has(k)) return;
+        seen.add(k);
+        n += 1;
+      });
+      return n;
     }
+    const marker = 'row:' + String(c.customerId || '') + ':' + String(c.saleId || '');
+    if (seen.has(marker)) return 0;
+    seen.add(marker);
     return 1;
   }
 
@@ -201,22 +211,25 @@ const DashboardInadimplencia = (function() {
   function sprintCarteiraMetrics(list) {
     const bills = Array.isArray(list) ? list : [];
     let value = 0;
-    let titles = 0;
     let sumDelay = 0;
     let counted = 0;
     const clients = new Set();
+    const seenTitles = new Set();
     bills.forEach((b) => {
-      if ((Number(b.overdueValue) || 0) < 0.01) return;
-      value += Number(b.overdueValue) || 0;
-      clients.add(b.customerId);
-      titles += clientTitles(b);
-      sumDelay += Number(b.maxDaysDelay) || 0;
-      counted += 1;
+      const val = Number(b.overdueValue) || 0;
+      const nTit = takeNewTitles(b, seenTitles);
+      if (nTit === 0 && val < 0.01) return;
+      value += val;
+      if (b.customerId != null) clients.add(b.customerId);
+      if (val >= 0.01) {
+        sumDelay += Number(b.maxDaysDelay) || 0;
+        counted += 1;
+      }
     });
     return {
       value,
       clients: clients.size,
-      titles,
+      titles: seenTitles.size,
       avgDelay: counted > 0 ? Math.round(sumDelay / counted) : 0
     };
   }
@@ -418,14 +431,15 @@ const DashboardInadimplencia = (function() {
     });
   }
 
-  /** Snapshot guarda títulos por faixa; clientes por faixa só existem na carteira ao vivo. */
+  /** No modo quantidade, o gráfico usa títulos (count), a mesma base do card e da fila. */
   function bucketQuantity(row, metric) {
     if (!row) return 0;
     if (metric !== 'count') return Number(row.value) || 0;
+    const count = Number(row.count);
+    if (Number.isFinite(count) && count > 0) return count;
     const clients = Number(row.clients);
-    const count = Number(row.count) || 0;
     if (Number.isFinite(clients) && clients > 0) return clients;
-    return count;
+    return 0;
   }
 
   function stampAgingClients(aging) {
@@ -539,9 +553,9 @@ const DashboardInadimplencia = (function() {
 
   function metricsQuantity(metrics) {
     if (!metrics) return 0;
-    const customers = Number(metrics.total_customers);
-    if (Number.isFinite(customers) && customers > 0) return customers;
-    return Number(metrics.total_count) || 0;
+    const titles = Number(metrics.total_count);
+    if (Number.isFinite(titles) && titles > 0) return titles;
+    return Number(metrics.total_customers) || 0;
   }
 
   function filteredSnapshotMetric(snap, f) {
@@ -550,7 +564,11 @@ const DashboardInadimplencia = (function() {
       if (!hasAnyFilter(f)) return Number(snap.total_value) || 0;
       return aggregateFromSnapshot(snap, f).total_value;
     }
-    if (!hasAnyFilter(f)) return Number(snap.total_customers || snap.total_count) || 0;
+    if (!hasAnyFilter(f)) {
+      const titles = Number(snap.total_count);
+      if (Number.isFinite(titles) && titles > 0) return titles;
+      return Number(snap.total_customers) || 0;
+    }
     return metricsQuantity(aggregateFromSnapshot(snap, f));
   }
 
@@ -559,7 +577,7 @@ const DashboardInadimplencia = (function() {
     return `
       <div class="di-metric-toggle" role="group" aria-label="Unidade do gráfico">
         <button type="button" class="di-metric-btn ${isVal ? 'is-active' : ''}" data-metric="value" onclick="window.DashboardInadimplencia.setChartMetric('value')">Valor (R$)</button>
-        <button type="button" class="di-metric-btn ${isVal ? '' : 'is-active'}" data-metric="count" onclick="window.DashboardInadimplencia.setChartMetric('count')">Clientes</button>
+        <button type="button" class="di-metric-btn ${isVal ? '' : 'is-active'}" data-metric="count" onclick="window.DashboardInadimplencia.setChartMetric('count')">Títulos</button>
       </div>`;
   }
 
@@ -861,7 +879,11 @@ const DashboardInadimplencia = (function() {
   }
 
   function aggregateFromLive(clients, f) {
-    const filtered = clients.filter(c => clientMatches(c, f) && clientValue(c) >= 0.01);
+    let base = Array.isArray(clients) ? clients : [];
+    if (typeof window.filterOutHiddenWebro === 'function') {
+      base = window.filterOutHiddenWebro(base, 'fila') || base;
+    }
+    const filtered = base.filter(c => clientMatches(c, f));
     const aging = emptyAging();
     const agingCust = {
       d0_30: new Set(), d31_60: new Set(), d61_90: new Set(), d91_120: new Set(), d120p: new Set()
@@ -873,10 +895,12 @@ const DashboardInadimplencia = (function() {
     let subjudice_count = 0;
     let subjudice_value = 0;
     const customers = new Set();
+    const seenTitles = new Set();
 
     filtered.forEach(c => {
       const val = clientValue(c);
-      const nTit = clientTitles(c);
+      const nTit = takeNewTitles(c, seenTitles);
+      if (nTit === 0 && val < 0.01) return;
       const delay = clientDelay(c);
       total_value += val;
       total_count += nTit;
@@ -1474,7 +1498,12 @@ const DashboardInadimplencia = (function() {
                 if (outlierFlags[i]) label += ' (possível carga parcial)';
                 if (snap && snap.is_month_close) label += ' (Fechamento)';
                 if (hasAnyFilter(f)) label += ' · filtrado';
-                else if (!isChartCount() && snap && snap.total_count) label += ` · ${snap.total_count} títulos`;
+                else if (!isChartCount()) {
+                  const isLast = i === rawValues.length - 1;
+                  const liveN = (isLast && liveMetrics) ? Number(liveMetrics.total_count) || 0 : 0;
+                  const n = liveN > 0 ? liveN : Number(snap && snap.total_count) || 0;
+                  if (n > 0) label += ` · ${n.toLocaleString('pt-BR')} títulos`;
+                }
                 return label;
               }
             }
@@ -1934,12 +1963,17 @@ const DashboardInadimplencia = (function() {
     let above31Value = 0;
     let above31Titles = 0;
     
+    const seenSprintTitles = new Set();
     bills.forEach(b => {
-      if ((Number(b.overdueValue) || 0) < 0.01) return;
-      totalOverdue += b.overdueValue || 0;
-      uniqueClients.add(b.customerId);
-      totalBills += clientTitles(b);
-      sumMaxDaysDelay += (b.maxDaysDelay || 0);
+      const val = Number(b.overdueValue) || 0;
+      const nTitulos = takeNewTitles(b, seenSprintTitles);
+      if (nTitulos === 0 && val < 0.01) return;
+      if (val >= 0.01) {
+        totalOverdue += val;
+        uniqueClients.add(b.customerId);
+        sumMaxDaysDelay += (b.maxDaysDelay || 0);
+      }
+      totalBills += nTitulos;
 
       const delay = b.maxDaysDelay || 0;
       let delayBucket = '';
@@ -1961,7 +1995,6 @@ const DashboardInadimplencia = (function() {
          companyData[compId] = { id: compId, name: compName.toUpperCase(), totalBills: 0, totalValue: 0, d30_v: 0, d60_v: 0, d90_v: 0, d120_v: 0, d120p_v: 0, subjudice_v: 0 };
       }
       const comp = companyData[compId];
-      const nTitulos = clientTitles(b);
       comp.totalBills += nTitulos;
       comp.totalValue += (b.overdueValue || 0);
       if (b.subjudice === 'S') comp.subjudice_v += (b.overdueValue || 0);

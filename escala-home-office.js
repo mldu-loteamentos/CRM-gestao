@@ -1,9 +1,16 @@
 /* Escala de home office da cobrança interna e do back office.
    Segunda, quinta e sexta. O rodízio de três semanas está ancorado em 28/09/2026.
-   Feriado nesse dia passa para a quarta da mesma semana. Férias tiram a pessoa do calendário. */
+   Feriado nesse dia passa para a quarta da mesma semana.
+   Ausência de uma colaboradora (férias, atestado, day off ou emenda) tira o home office de todo o time nesses dias. */
 const EscalaHomeOffice = {
   ANCORA: "2026-09-28",
   ALMOCO_HO: "12h30–13h42",
+  MOTIVOS: [
+    { id: "ferias", label: "Férias" },
+    { id: "atestado", label: "Atestado" },
+    { id: "dayoff", label: "Day off" },
+    { id: "emenda", label: "Emenda de feriado" }
+  ],
   OPERADORES: [
     { id: "leticia", nome: "Letícia" },
     { id: "michelle", nome: "Michelle" },
@@ -116,9 +123,39 @@ const EscalaHomeOffice = {
     return Math.floor(diff / 7);
   },
 
-  emFerias(id, iso) {
+  rotuloMotivo(id) {
+    const m = this.MOTIVOS.find((item) => item.id === id);
+    return m ? m.label : "Férias";
+  },
+
+  motivoValido(id) {
+    return this.MOTIVOS.some((item) => item.id === id);
+  },
+
+  ausenciaDe(id, iso) {
     const lista = (this.state.ferias && this.state.ferias[id]) || [];
-    return lista.some((f) => f.inicio && f.fim && f.inicio <= iso && iso <= f.fim);
+    return lista.find((f) => f.inicio && f.fim && f.inicio <= iso && iso <= f.fim) || null;
+  },
+
+  emFerias(id, iso) {
+    return !!this.ausenciaDe(id, iso);
+  },
+
+  ausenciasNoDia(iso) {
+    const lista = [];
+    this.OPERADORES.forEach((op) => {
+      (this.state.ferias[op.id] || []).forEach((f) => {
+        if (f.inicio && f.fim && f.inicio <= iso && iso <= f.fim) {
+          lista.push({ id: op.id, motivo: f.motivo || "ferias" });
+        }
+      });
+    });
+    return lista;
+  },
+
+  textoBloqueio(lista) {
+    const nomes = (lista || []).map((a) => this.nome(a.id) + " (" + this.rotuloMotivo(a.motivo) + ")").join(", ");
+    return "Ausência de " + nomes + ". Nesse dia ninguém fica de home office.";
   },
 
   /* Quem cobre o almoço no escritório quando a outra pessoa está em home office. */
@@ -210,22 +247,32 @@ const EscalaHomeOffice = {
   },
 
   diaDe(data, ho) {
-    if (!ho || this.emFerias(ho, data)) return null;
+    const ausencias = this.ausenciasNoDia(data);
+    if (ausencias.length) {
+      return { data, ho: "", cedo: "", tarde: "", ausencias, semHome: true };
+    }
+    if (!ho) return null;
     const cob = this.cobertura(ho);
-    return {
-      data,
-      ho,
-      cedo: this.emFerias(cob.cedo, data) ? "" : cob.cedo,
-      tarde: this.emFerias(cob.tarde, data) ? "" : cob.tarde,
-      cedoFerias: this.emFerias(cob.cedo, data),
-      tardeFerias: this.emFerias(cob.tarde, data)
-    };
+    return { data, ho, cedo: cob.cedo, tarde: cob.tarde, ausencias: [], semHome: false };
   },
 
-  /* Dias de home office entre duas datas, já sem quem está de férias. */
+  /* Dias de home office e dias de semana com ausência. Ausência de uma pessoa zera o home office do time. */
   escala(de, ate) {
     const map = this.mapa(de, ate);
-    return Object.keys(map).sort().map((data) => this.diaDe(data, map[data])).filter(Boolean);
+    const datas = {};
+    Object.keys(map).forEach((data) => { datas[data] = true; });
+    this.OPERADORES.forEach((op) => {
+      (this.state.ferias[op.id] || []).forEach((f) => {
+        if (!f.inicio || !f.fim) return;
+        let d = f.inicio < de ? de : f.inicio;
+        const fim = f.fim > ate ? ate : f.fim;
+        while (d && d <= fim) {
+          if (!this.ehFimDeSemana(d)) datas[d] = true;
+          d = this.addDias(d, 1);
+        }
+      });
+    });
+    return Object.keys(datas).sort().map((data) => this.diaDe(data, map[data] || "")).filter(Boolean);
   },
 
   proximoDiaUtil(iso) {
@@ -258,10 +305,12 @@ const EscalaHomeOffice = {
 
   papelNoDia(id, dia) {
     if (!dia) return "";
+    const ausencia = this.ausenciaDe(id, dia.data);
+    if (ausencia) return this.rotuloMotivo(ausencia.motivo);
+    if (dia.semHome) return "Escritório";
     if (dia.ho === id) return "Home office · almoço " + this.ALMOCO_HO;
     if (dia.cedo === id) return "Escritório · 12h00–13h12";
     if (dia.tarde === id) return "Escritório · 13h30–14h42";
-    if (this.emFerias(id, dia.data)) return "Férias";
     return "";
   },
 
@@ -285,7 +334,8 @@ const EscalaHomeOffice = {
       const lista = Array.isArray(src[op.id]) ? src[op.id] : [];
       base[op.id] = lista.map((f) => ({
         inicio: String((f && f.inicio) || "").slice(0, 10),
-        fim: String((f && f.fim) || "").slice(0, 10)
+        fim: String((f && f.fim) || "").slice(0, 10),
+        motivo: this.motivoValido(f && f.motivo) ? f.motivo : "ferias"
       })).filter((f) => /^\d{4}-\d{2}-\d{2}$/.test(f.inicio) && /^\d{4}-\d{2}-\d{2}$/.test(f.fim) && f.inicio <= f.fim);
     });
     return base;
@@ -358,49 +408,70 @@ const EscalaHomeOffice = {
     }
   },
 
-  celula(id, ferias, destacar) {
+  celula(id, destacar) {
     if (id) return `<strong class="${id === destacar ? "eho-eu" : ""}">${this.esc(this.nome(id))}</strong>`;
-    if (ferias) return `<span class="eho-ferias">Férias</span>`;
     return "—";
+  },
+
+  chipsAusencia(lista) {
+    return (lista || []).map((a) => `<span class="eho-chip eho-chip-${this.esc(a.motivo)}">${this.esc(this.nome(a.id))} · ${this.esc(this.rotuloMotivo(a.motivo))}</span>`).join("");
+  },
+
+  classeAusencia(lista) {
+    if (!lista || !lista.length) return "";
+    const motivos = [...new Set(lista.map((a) => a.motivo))];
+    return motivos.length === 1 ? "eho-aus-" + motivos[0] : "eho-aus-mista";
+  },
+
+  legendaHtml() {
+    return `<div class="eho-legenda">${this.MOTIVOS.map((m) => `<span class="eho-chip eho-chip-${m.id}">${this.esc(m.label)}</span>`).join("")}</div>`;
   },
 
   tabela(dias, destacar, clicavel) {
     const pode = !!clicavel && this.podeEditar();
     const linhas = dias.map((d) => {
       const meu = destacar && d.ho === destacar;
-      const cls = [meu ? "is-meu" : "", pode ? "eho-clicavel" : ""].filter(Boolean).join(" ");
-      const click = pode ? ` onclick="EscalaHomeOffice.abrirTroca('${d.data}')" title="Alterar a data ou quem fica de home office"` : "";
-      return `<tr class="${cls}"${click}>
+      const aus = d.ausencias || [];
+      const cls = [!d.semHome && meu ? "is-meu" : "", this.classeAusencia(aus), pode && !d.semHome ? "eho-clicavel" : ""].filter(Boolean).join(" ");
+      const click = pode && !d.semHome ? ` onclick="EscalaHomeOffice.abrirTroca('${d.data}')" title="Alterar a data ou quem fica de home office"` : "";
+      const dica = d.semHome ? ` title="${this.esc(this.textoBloqueio(aus))}"` : "";
+      const almoco = d.semHome ? "—" : this.esc(this.ALMOCO_HO);
+      const home = d.semHome ? `<span class="eho-sem">Sem home office</span>` : this.celula(d.ho, destacar);
+      return `<tr class="${cls}"${click}${dica}>
         <td>${this.esc(this.dataBr(d.data))}</td>
         <td>${this.esc(this.diaBr(d.data))}</td>
-        <td>${this.celula(d.ho, false, destacar)}</td>
-        <td>${this.esc(this.ALMOCO_HO)}</td>
-        <td>${this.celula(d.cedo, d.cedoFerias, destacar)}</td>
-        <td>${this.celula(d.tarde, d.tardeFerias, destacar)}</td>
+        <td>${home}</td>
+        <td>${almoco}</td>
+        <td>${this.celula(d.cedo, destacar)}</td>
+        <td>${this.celula(d.tarde, destacar)}</td>
+        <td><div class="eho-ausencias">${this.chipsAusencia(aus) || "—"}</div></td>
       </tr>`;
     }).join("");
     return `<table class="eho-tabela">
-      <thead><tr><th>Data</th><th>Dia</th><th>Home office</th><th>Almoço HO</th><th>12h00–13h12</th><th>13h30–14h42</th></tr></thead>
-      <tbody>${linhas || `<tr><td colspan="6">Nenhum home office neste período.</td></tr>`}</tbody>
+      <thead><tr><th>Data</th><th>Dia</th><th>Home office</th><th>Almoço HO</th><th>12h00–13h12</th><th>13h30–14h42</th><th>Ausência</th></tr></thead>
+      <tbody>${linhas || `<tr><td colspan="7">Nenhum home office neste período.</td></tr>`}</tbody>
     </table>`;
   },
 
   feriasHtml() {
     const pode = this.podeEditar();
+    const motivos = this.MOTIVOS.map((m) => `<option value="${m.id}">${this.esc(m.label)}</option>`).join("");
     return this.OPERADORES.map((op) => {
       const periodos = (this.state.ferias[op.id] || []).map((f, i) => `
         <div class="eho-periodo">
-          <span>Período ${i + 1}: ${this.esc(this.dataBr(f.inicio))} a ${this.esc(this.dataBr(f.fim))}</span>
-          ${pode ? `<button type="button" class="tvig-ico is-danger" title="Remover férias" onclick="EscalaHomeOffice.removerFerias('${op.id}', ${i})"><i data-lucide="trash-2"></i></button>` : ""}
+          <span class="eho-chip eho-chip-${this.esc(f.motivo || "ferias")}">${this.esc(this.rotuloMotivo(f.motivo))}</span>
+          <span>${this.esc(this.dataBr(f.inicio))} a ${this.esc(this.dataBr(f.fim))}</span>
+          ${pode ? `<button type="button" class="tvig-ico is-danger" title="Remover ausência" onclick="EscalaHomeOffice.removerFerias('${op.id}', ${i})"><i data-lucide="trash-2"></i></button>` : ""}
         </div>`).join("");
       return `<article class="eho-op">
         <h4>${this.esc(op.nome)}</h4>
         <div class="eho-datas">
           <label>Início<input type="date" id="eho-ini-${op.id}" ${pode ? "" : "disabled"}></label>
           <label>Fim<input type="date" id="eho-fim-${op.id}" ${pode ? "" : "disabled"}></label>
-          <button type="button" class="btn btn-primary btn-sm" ${pode ? "" : "disabled"} onclick="EscalaHomeOffice.adicionarFerias('${op.id}')">Incluir período</button>
+          <label>Motivo<select id="eho-mot-${op.id}" ${pode ? "" : "disabled"}>${motivos}</select></label>
+          <button type="button" class="btn btn-primary btn-sm" ${pode ? "" : "disabled"} onclick="EscalaHomeOffice.adicionarFerias('${op.id}')">Inserir ausência</button>
         </div>
-        <div class="eho-periodos">${periodos || `<span class="eho-vazio">Nenhum período. Dá para incluir mais de um.</span>`}</div>
+        <div class="eho-periodos">${periodos || `<span class="eho-vazio">Nenhuma ausência. Dá para incluir mais de uma.</span>`}</div>
       </article>`;
     }).join("");
   },
@@ -415,8 +486,9 @@ const EscalaHomeOffice = {
     const sem = this.semanaQueVem();
     const eu = this.eu();
     root.innerHTML = `
-      <p class="eho-intro">A escala vale de hoje em diante, em segunda, quinta e sexta. O feriado desses dias passa para a quarta. Quem está de férias sai do home office e da cobertura de almoço no calendário de todo o time. Cada colaboradora pode ter vários períodos de férias. Clique numa data para mudar o dia ou quem fica de home office.</p>
-      <h4 class="eho-sec">Férias</h4>
+      <p class="eho-intro">A escala vale de hoje em diante, em segunda, quinta e sexta. O feriado desses dias passa para a quarta. Informe o período e o motivo da ausência. Se uma colaboradora está ausente, ninguém fica de home office nesses dias. Clique numa data sem ausência para mudar o dia ou quem fica de home office.</p>
+      <h4 class="eho-sec">Ausências</h4>
+      ${this.legendaHtml()}
       <div class="eho-ops">${this.feriasHtml()}</div>
       <p id="eho-status" class="eho-status"></p>
       <h4 class="eho-sec">Próxima semana${eu ? " · " + this.esc(this.nome(eu)) : ""}</h4>
@@ -431,23 +503,25 @@ const EscalaHomeOffice = {
     if (!this.podeEditar()) return;
     const ini = document.getElementById("eho-ini-" + id);
     const fim = document.getElementById("eho-fim-" + id);
+    const mot = document.getElementById("eho-mot-" + id);
     const inicio = ini && ini.value;
     const final = fim && fim.value;
+    const motivo = mot && mot.value;
     const status = document.getElementById("eho-status");
-    if (!inicio || !final || inicio > final) {
-      if (status) status.textContent = "Informe o início e o fim das férias.";
+    if (!inicio || !final || inicio > final || !this.motivoValido(motivo)) {
+      if (status) status.textContent = "Informe o início, o fim e o motivo da ausência.";
       return;
     }
     const lista = this.state.ferias[id] || [];
-    if (lista.some((f) => f.inicio === inicio && f.fim === final)) {
-      if (status) status.textContent = "Esse período já está lançado. Informe outro intervalo.";
+    if (lista.some((f) => f.inicio === inicio && f.fim === final && (f.motivo || "ferias") === motivo)) {
+      if (status) status.textContent = "Essa ausência já está lançada. Informe outro intervalo ou outro motivo.";
       return;
     }
-    this.state.ferias[id] = lista.concat([{ inicio, fim: final }]);
+    this.state.ferias[id] = lista.concat([{ inicio, fim: final, motivo }]);
     await this.salvar();
     await this.render();
     const msg = document.getElementById("eho-status");
-    if (msg) msg.textContent = "Período de férias de " + this.nome(id) + " incluído. O calendário de todo o time foi atualizado.";
+    if (msg) msg.textContent = "Ausência de " + this.nome(id) + " incluída (" + this.rotuloMotivo(motivo) + "). Nesse período ninguém fica de home office.";
     if (window.HomeDashboard && typeof window.HomeDashboard.renderEscalaHome === "function") window.HomeDashboard.renderEscalaHome();
   },
 
@@ -528,15 +602,17 @@ const EscalaHomeOffice = {
       this.avisoTroca("Escolha um dia de semana.");
       return;
     }
-    if (this.emFerias(ho, para)) {
-      this.avisoTroca(this.nome(ho) + " está de férias nesse dia.");
+    const bloqueio = this.ausenciasNoDia(para);
+    if (bloqueio.length) {
+      this.avisoTroca(this.textoBloqueio(bloqueio));
       return;
     }
     const mapa = this.mapaAmplo(de < para ? de : para, de > para ? de : para);
     if (para !== de && mapa[para] && mapa[para] !== ho) {
       const outro = mapa[para];
-      if (this.emFerias(outro, de)) {
-        this.avisoTroca(this.nome(outro) + " está de férias em " + this.dataBr(de) + " e não pode assumir essa data.");
+      const bloqueioDe = this.ausenciasNoDia(de);
+      if (bloqueioDe.length) {
+        this.avisoTroca(this.textoBloqueio(bloqueioDe));
         return;
       }
       mapa[de] = outro;

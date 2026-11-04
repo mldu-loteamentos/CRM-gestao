@@ -3789,6 +3789,7 @@ function switchTab(tabId, titleOverride, showLoader = false) {
     agenda: "Agenda do Operador",
     zeropaid: "Clientes 0% Pago (Sem Receita)",
     wesend: "Notificações",
+    "central-email": "Central de e-mail",
     preambles: "Preâmbulos",
     anexos: "Assistente de Anexos",
     "contas-pagar": "Assistente de Contas a Pagar",
@@ -3880,6 +3881,7 @@ function switchTab(tabId, titleOverride, showLoader = false) {
     agenda: "calendar",
     zeropaid: "percent",
     wesend: "mail",
+    "central-email": "mail",
     preambles: "settings",
     anexos: "paperclip",
     "contas-pagar": "landmark",
@@ -4051,6 +4053,8 @@ function switchTab(tabId, titleOverride, showLoader = false) {
     loadCentrosCustoTab();
   } else if (tabId === "followup-cnd") {
     if (window.FollowupCndApp && typeof FollowupCndApp.abrir === "function") FollowupCndApp.abrir();
+  } else if (tabId === "central-email") {
+    if (window.CentralEmailApp && typeof CentralEmailApp.abrir === "function") CentralEmailApp.abrir();
   } else if (tabId === "doc-padrao") {
     loadDocPadraoTemplates();
   } else if (tabId === "upload-kmz") {
@@ -5146,6 +5150,9 @@ async function processSuccessfulLogin(loggedUser) {
       }
       if (window.GerarPagamentoApp && typeof window.GerarPagamentoApp.avisoFechamento === "function") {
         window.GerarPagamentoApp.avisoFechamento();
+      }
+      if (window.GerarPagamentoApp && typeof window.GerarPagamentoApp.agendarConferenciaLotes === "function") {
+        window.GerarPagamentoApp.agendarConferenciaLotes();
       }
       if (window.EscalaHomeOffice && typeof window.EscalaHomeOffice.avisar === "function") {
         window.EscalaHomeOffice.avisar();

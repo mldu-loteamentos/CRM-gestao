@@ -1225,286 +1225,17 @@ window.VerificarConstrucaoApp = {
             const clients = (doBatimento && doBatimento.length)
                 ? doBatimento
                 : (window.rawClientList || (window.AppState && window.AppState.sales) || []);
-            // Filter will be applied after loading checksByContract
-            const checksByContract = {};
-            const completedChecksByContract = {};
-            const latestCheckDateByContract = {};
-            
-            if (window.firebaseDb && window.firebaseCollections) {
-                try {
-                    const { collection, getDocs, query, where } = window.firebaseCollections;
-                    const q = query(collection(window.firebaseDb, 'vistorias'), where('status', '!=', 'concluida'));
-                    const snap = await getDocs(q);
-                    snap.forEach(doc => {
-                        const data = doc.data();
-                        if (data.isTest) return;
-                        const docObj = { id: doc.id, ...data };
-                        const register = (key) => {
-                            if (key === undefined || key === null || String(key).trim() === '') return;
-                            const k = String(key);
-                            const prev = checksByContract[k];
-                            if (!prev) {
-                                checksByContract[k] = docObj;
-                                return;
-                            }
-                            const prevDate = _vcPendingRequestDate(prev);
-                            const nextDate = _vcPendingRequestDate(docObj);
-                            if (!prevDate || (nextDate && nextDate >= prevDate)) checksByContract[k] = docObj;
-                        };
-                        _vcDocIdentityKeys(data).forEach(register);
-                    });
-
-                    const snapChecks = await getDocs(collection(window.firebaseDb, 'construction_checks'));
-                    snapChecks.forEach(doc => {
-                        const data = doc.data();
-                        if (data.stage && data.stage.trim() !== '') {
-                            const cDate = _vcTimestampToDateStr(data.date || data.createdAt) || '1970-01-01';
-                            
-                            const keysToSet = _vcDocIdentityKeys(data);
-                            if (!keysToSet.length && data.contractId) keysToSet.push(String(data.contractId));
-                            
-                            keysToSet.forEach(key => {
-                                const prevDate = _vcTimestampToDateStr(latestCheckDateByContract[key]);
-                                if (!prevDate || cDate >= prevDate) {
-                                    latestCheckDateByContract[key] = cDate;
-                                    
-                                    const stageUpper = data.stage.trim().toUpperCase();
-                                    if (stageUpper === 'SEM CONSTRUÇÃO' || stageUpper === 'TERRAPLANAGEM' || stageUpper === 'SEM CONSTRUCAO') {
-                                        completedChecksByContract[key] = false;
-                                    } else {
-                                        completedChecksByContract[key] = true;
-                                    }
-                                }
-                            });
-                        }
-                    });
-                    const staleKeys = [];
-                    const seenPending = new Set();
-                    Object.values(checksByContract).forEach(pending => {
-                        if (!pending || !pending.id || seenPending.has(pending.id)) return;
-                        seenPending.add(pending.id);
-                        const keys = _vcDocIdentityKeys(pending);
-                        const latestCheck = _vcLatestDateAmong(keys, latestCheckDateByContract);
-                        if (_vcIsPendingSuperseded(pending, latestCheck)) {
-                            staleKeys.push(...keys);
-                        }
-                    });
-                    if (staleKeys.length) {
-                        window.closePendingLinkVistorias(staleKeys, 'vistoria_interna').catch(err => {
-                            console.warn('[Vistoria] Falha ao encerrar links antigos após vistoria interna:', err);
-                        });
-                    }
-                } catch (err) {
-                    console.warn('[Vistoria] Erro ao buscar histórico:', err);
-                }
-            }
-
-            const supersededLinkKeys = [];
-
-            const elegiveis = clients.filter(c => {
-                const contractLookupKeys = _vcClientLookupKeys(c);
-                const pendingRaw = contractLookupKeys.map(k => checksByContract[String(k)]).find(Boolean) || null;
-                if (_vcIsFollowupPending(pendingRaw)) return true;
-
-                const maxDelay = parseInt(c.maxDaysDelay) || 0;
-                if (maxDelay < thresholdDays) return false;
-
-                const latestCheckDate = _vcLatestDateAmong(contractLookupKeys, latestCheckDateByContract);
-                const daysSinceCheck = _vcDaysSince(latestCheckDate);
-                const answered = _vcLinkWasAnswered(pendingRaw);
-                const linkAfterCheck = !!(pendingRaw && !answered && !_vcIsPendingSuperseded(pendingRaw, latestCheckDate));
-                if (pendingRaw && latestCheckDate && daysSinceCheck !== null && daysSinceCheck < recurrenceDays && !linkAfterCheck) {
-                    supersededLinkKeys.push(...contractLookupKeys, ..._vcDocIdentityKeys(pendingRaw));
-                }
-                if (latestCheckDate && daysSinceCheck !== null && daysSinceCheck < recurrenceDays) {
-                    return linkAfterCheck;
-                }
-                return true;
-            });
-
-            if (supersededLinkKeys.length && typeof window.closePendingLinkVistorias === 'function') {
-                window.closePendingLinkVistorias(supersededLinkKeys, 'vistoria_interna').catch(err => {
+            const indexes = await _vcFetchVistoriaIndexes(true);
+            const built = _vcBuildVistoriaRows(clients, indexes, thresholdDays, recurrenceDays);
+            if (built.supersededLinkKeys.length && typeof window.closePendingLinkVistorias === 'function') {
+                window.closePendingLinkVistorias(built.supersededLinkKeys, 'vistoria_interna').catch(err => {
                     console.warn('[Vistoria] Falha ao encerrar link antigo do lote vistoriado:', err);
                 });
             }
-
-            const rows = [];
-            elegiveis.forEach(c => {
-                const contractId = c.saleId || c.contractId || c.id;
-                let fallbackTitle = contractId;
-                if (c.billIds && c.billIds.length > 0) fallbackTitle = c.billIds[0];
-                const tituloKey = c.saleCode || c.contractCode || c.titulo || c.codigo || fallbackTitle;
-                const realSaleIdStr = String(c.realSaleId || '');
-                const contractNumberStr = String(c.contractNumber || '');
-                const contractLookupKeys = _vcClientLookupKeys(c);
-                
-                const hasConstruction = contractLookupKeys.some(k => completedChecksByContract[k]);
-                const vistoriaAtiva = _vcResolvePendingVistoria(
-                    contractLookupKeys,
-                    checksByContract,
-                    latestCheckDateByContract
-                );
-                if (hasConstruction && !_vcIsFollowupPending(vistoriaAtiva)) return;
-
-                const costCenterId = _vcExtractCostCenterId(c);
-                const city = _vcGetCity(costCenterId);
-                const empreendimento = _vcEmpNameFromCc(costCenterId) || '-';
-                const empLabel = _vcGetEmpLabel(costCenterId);
-
-                const unidade = c.unitName || c.unit || c.unidade || contractId || '-';
-                const latestCheckDate = _vcLatestDateAmong(contractLookupKeys, latestCheckDateByContract);
-                const daysSinceRecentCheck = _vcDaysSince(latestCheckDate);
-                if (daysSinceRecentCheck !== null && daysSinceRecentCheck < recurrenceDays && !vistoriaAtiva) return;
-
-                // Dados financeiros do cliente
-                const clienteName = c.customerName || c.name || c.nome || '-';
-                const titulo = tituloKey || '-';
-                const parcelasVencidas = parseInt(c.billCount || c.overdueInstallments || c.parcelasVencidas || 0);
-                const valorVencido = parseFloat((c.overdueValue || 0) + (c.overdueCharges || 0));
-
-                let statusLabel = 'Pendente de Vistoria';
-                let statusColor = 'color: #dc2626; font-weight: bold;';
-                let solicitadoHa = '';
-
-                if (_vcIsFollowupPending(vistoriaAtiva)) {
-                    if (vistoriaAtiva.status === 'aguardando_fotos') {
-                        statusLabel = 'Link Enviado – Aguardando Fotos';
-                        statusColor = 'color: #d97706; font-weight: 600;';
-                        const reqDate = _vcTimestampToDateStr(vistoriaAtiva.createdAt)
-                            || _vcTimestampToDateStr(vistoriaAtiva.requestedAt)
-                            || _vcTimestampToDateStr(vistoriaAtiva.updatedAt);
-                        const reqDays = reqDate ? _vcDaysSince(reqDate) : null;
-                        if (reqDays === 0) solicitadoHa = 'Solicitado hoje';
-                        else if (reqDays !== null) solicitadoHa = `Há ${reqDays} dia(s)`;
-                    } else if (vistoriaAtiva.status === 'aguardando_validacao') {
-                        statusLabel = 'Aguardando Validação';
-                        statusColor = 'color: #7c3aed; font-weight: 600;';
-                    }
-                } else if (hasConstruction) {
-                    statusLabel = 'Construção Identificada (Dispensado)';
-                    statusColor = 'color: #16a34a; font-weight: 600;';
-                }
-
-                let lastCheckDateStr = '-';
-                let lastCheckDays = '-';
-                const contractKeys = contractLookupKeys.slice();
-                
-                let maxDate = latestCheckDate && latestCheckDate !== '1970-01-01' ? latestCheckDate : null;
-                contractLookupKeys.forEach(k => {
-                    const d = latestCheckDateByContract[k];
-                    if (d && d !== '1970-01-01') {
-                        if (!maxDate || d > maxDate) maxDate = d;
-                    }
-                });
-
-                if (maxDate) {
-                    const parts = maxDate.split('T')[0].split('-');
-                    if (parts.length === 3) lastCheckDateStr = `${parts[2]}/${parts[1]}/${parts[0]}`;
-                    
-                    const dt = new Date(maxDate.split('T')[0] + 'T12:00:00');
-                    const now = new Date();
-                    now.setHours(12, 0, 0, 0);
-                    const diffTime = now.getTime() - dt.getTime();
-                    const diffDays = Math.floor(diffTime / (1000 * 60 * 60 * 24));
-                    lastCheckDays = diffDays >= 0 ? `${diffDays} dia(s)` : 'Hoje';
-                }
-
-                rows.push({
-                    customerId: c.customerId, contractId, cidade: city, costCenterId, companyId: c.companyId || '',
-                    empreendimento, empLabel, unidade,
-                    clienteName, titulo, tituloKey, contractNumberStr, realSaleIdStr,
-                    parcelasVencidas, valorVencido, lastCheckDateStr, lastCheckDays,
-                    statusLabel, statusColor, solicitadoHa, vistoriaAtiva, originalIdx: rows.length, hasConstruction, contractKeys,
-                    subjudice: _vcClientIsSubjudice(c)
-                });
-            });
-
-            const seenPendingIds = new Set(rows.map(r => r.vistoriaAtiva && r.vistoriaAtiva.id).filter(Boolean));
-            const pendingDocs = [];
-            const seenDoc = new Set();
-            Object.values(checksByContract).forEach(docObj => {
-                if (!docObj || !docObj.id || seenDoc.has(docObj.id)) return;
-                seenDoc.add(docObj.id);
-                if (!_vcIsFollowupPending(docObj)) return;
-                pendingDocs.push(docObj);
-            });
-            pendingDocs.forEach(v => {
-                if (seenPendingIds.has(v.id)) return;
-                const vKeys = _vcDocIdentityKeys(v);
-                const existing = rows.find(r => {
-                    if (r.vistoriaAtiva && r.vistoriaAtiva.id === v.id) return true;
-                    const rk = r.contractKeys || [];
-                    if (vKeys.some(k => rk.map(String).includes(String(k)))) return true;
-                    const sameUnit = String(r.unidade || '').replace(/^Quadra-Lote:\s*/i, '').trim().toUpperCase()
-                        === String(v.unidade || '').replace(/^Quadra-Lote:\s*/i, '').trim().toUpperCase();
-                    return sameUnit && String(r.costCenterId || '') === String(v.costCenterId || '') && v.costCenterId;
-                });
-                if (existing) {
-                    existing.vistoriaAtiva = v;
-                    existing.hasConstruction = false;
-                    if (v.subjudice === true || v.subjudice === 'S') existing.subjudice = true;
-                    if (v.status === 'aguardando_validacao') {
-                        existing.statusLabel = 'Aguardando Validação';
-                        existing.statusColor = 'color: #7c3aed; font-weight: 600;';
-                        existing.solicitadoHa = '';
-                    } else {
-                        existing.statusLabel = 'Link Enviado – Aguardando Fotos';
-                        existing.statusColor = 'color: #d97706; font-weight: 600;';
-                    }
-                    seenPendingIds.add(v.id);
-                    return;
-                }
-                const client = (clients || []).find(c => _vcClientLookupKeys(c).some(k => vKeys.includes(String(k))));
-                const costCenterId = v.costCenterId || (client && _vcExtractCostCenterId(client)) || '';
-                const city = v.cidade || (costCenterId && _vcGetCity(costCenterId)) || '-';
-                const empreendimento = v.empreendimento || _vcEmpNameFromCc(costCenterId) || '-';
-                const empLabel = _vcEmpLabelOf(costCenterId, empreendimento);
-                let statusLabel = 'Aguardando Validação';
-                let statusColor = 'color: #7c3aed; font-weight: 600;';
-                let solicitadoHa = '';
-                if (v.status === 'aguardando_fotos') {
-                    statusLabel = 'Link Enviado – Aguardando Fotos';
-                    statusColor = 'color: #d97706; font-weight: 600;';
-                    const reqDate = _vcTimestampToDateStr(v.createdAt) || _vcTimestampToDateStr(v.requestedAt) || _vcTimestampToDateStr(v.updatedAt);
-                    const reqDays = reqDate ? _vcDaysSince(reqDate) : null;
-                    if (reqDays === 0) solicitadoHa = 'Solicitado hoje';
-                    else if (reqDays !== null) solicitadoHa = `Há ${reqDays} dia(s)`;
-                }
-                const parcelasVencidas = client ? parseInt(client.billCount || client.overdueInstallments || 0) : 0;
-                const valorVencido = client ? parseFloat((client.overdueValue || 0) + (client.overdueCharges || 0)) : 0;
-                rows.push({
-                    customerId: v.customerId || (client && client.customerId) || '',
-                    contractId: v.contractId || (client && (client.saleId || client.contractId || client.id)) || '',
-                    cidade: city,
-                    costCenterId,
-                    companyId: v.companyId || (client && client.companyId) || '',
-                    empreendimento,
-                    empLabel,
-                    unidade: v.unidade || (client && (client.unitName || client.unit)) || '-',
-                    clienteName: v.clienteName || (client && (client.customerName || client.name)) || '-',
-                    titulo: v.titulo || v.tituloKey || '-',
-                    tituloKey: v.tituloKey || v.titulo || '',
-                    contractNumberStr: String(v.contractId || ''),
-                    realSaleIdStr: '',
-                    parcelasVencidas,
-                    valorVencido,
-                    lastCheckDateStr: '-',
-                    lastCheckDays: '-',
-                    statusLabel,
-                    statusColor,
-                    solicitadoHa,
-                    vistoriaAtiva: v,
-                    originalIdx: rows.length,
-                    hasConstruction: false,
-                    contractKeys: vKeys,
-                    subjudice: _vcClientIsSubjudice(client) || v.subjudice === true || v.subjudice === 'S'
-                });
-                seenPendingIds.add(v.id);
-            });
-
-            rows.forEach((r, i) => r.originalIdx = i);
+            const rows = built.rows;
             rows.forEach(r => _vcApplyPortfolioFinance(r));
             this._builtWithClients = (clients || []).length > 0;
+            this._rowsReady = true;
             this.allRows = rows;
             this.renderedRows = [];
 
@@ -2828,6 +2559,314 @@ window.startVistoriaValidationAlertListener = function() {
     }
 };
 
+async function _vcFetchVistoriaIndexes(closeStale) {
+    const checksByContract = {};
+    const completedChecksByContract = {};
+    const latestCheckDateByContract = {};
+
+    if (window.firebaseDb && window.firebaseCollections) {
+        try {
+            const { collection, getDocs, query, where } = window.firebaseCollections;
+            const q = query(collection(window.firebaseDb, 'vistorias'), where('status', '!=', 'concluida'));
+            const snap = await getDocs(q);
+            snap.forEach(doc => {
+                const data = doc.data();
+                if (data.isTest) return;
+                const docObj = { id: doc.id, ...data };
+                const register = (key) => {
+                    if (key === undefined || key === null || String(key).trim() === '') return;
+                    const k = String(key);
+                    const prev = checksByContract[k];
+                    if (!prev) {
+                        checksByContract[k] = docObj;
+                        return;
+                    }
+                    const prevDate = _vcPendingRequestDate(prev);
+                    const nextDate = _vcPendingRequestDate(docObj);
+                    if (!prevDate || (nextDate && nextDate >= prevDate)) checksByContract[k] = docObj;
+                };
+                _vcDocIdentityKeys(data).forEach(register);
+            });
+
+            const snapChecks = await getDocs(collection(window.firebaseDb, 'construction_checks'));
+            snapChecks.forEach(doc => {
+                const data = doc.data();
+                if (data.stage && data.stage.trim() !== '') {
+                    const cDate = _vcTimestampToDateStr(data.date || data.createdAt) || '1970-01-01';
+
+                    const keysToSet = _vcDocIdentityKeys(data);
+                    if (!keysToSet.length && data.contractId) keysToSet.push(String(data.contractId));
+
+                    keysToSet.forEach(key => {
+                        const prevDate = _vcTimestampToDateStr(latestCheckDateByContract[key]);
+                        if (!prevDate || cDate >= prevDate) {
+                            latestCheckDateByContract[key] = cDate;
+
+                            const stageUpper = data.stage.trim().toUpperCase();
+                            if (stageUpper === 'SEM CONSTRUÇÃO' || stageUpper === 'TERRAPLANAGEM' || stageUpper === 'SEM CONSTRUCAO') {
+                                completedChecksByContract[key] = false;
+                            } else {
+                                completedChecksByContract[key] = true;
+                            }
+                        }
+                    });
+                }
+            });
+            const staleKeys = [];
+            const seenPending = new Set();
+            Object.values(checksByContract).forEach(pending => {
+                if (!pending || !pending.id || seenPending.has(pending.id)) return;
+                seenPending.add(pending.id);
+                const keys = _vcDocIdentityKeys(pending);
+                const latestCheck = _vcLatestDateAmong(keys, latestCheckDateByContract);
+                if (_vcIsPendingSuperseded(pending, latestCheck)) {
+                    staleKeys.push(...keys);
+                }
+            });
+            if (closeStale && staleKeys.length) {
+                window.closePendingLinkVistorias(staleKeys, 'vistoria_interna').catch(err => {
+                    console.warn('[Vistoria] Falha ao encerrar links antigos após vistoria interna:', err);
+                });
+            }
+        } catch (err) {
+            console.warn('[Vistoria] Erro ao buscar histórico:', err);
+        }
+    }
+
+    return { checksByContract, completedChecksByContract, latestCheckDateByContract };
+}
+
+function _vcBuildVistoriaRows(clients, indexes, thresholdDays, recurrenceDays) {
+    const checksByContract = indexes.checksByContract;
+    const completedChecksByContract = indexes.completedChecksByContract;
+    const latestCheckDateByContract = indexes.latestCheckDateByContract;
+    const supersededLinkKeys = [];
+
+    const elegiveis = clients.filter(c => {
+        const contractLookupKeys = _vcClientLookupKeys(c);
+        const pendingRaw = contractLookupKeys.map(k => checksByContract[String(k)]).find(Boolean) || null;
+        if (_vcIsFollowupPending(pendingRaw)) return true;
+
+        const maxDelay = parseInt(c.maxDaysDelay) || 0;
+        if (maxDelay < thresholdDays) return false;
+
+        const latestCheckDate = _vcLatestDateAmong(contractLookupKeys, latestCheckDateByContract);
+        const daysSinceCheck = _vcDaysSince(latestCheckDate);
+        const answered = _vcLinkWasAnswered(pendingRaw);
+        const linkAfterCheck = !!(pendingRaw && !answered && !_vcIsPendingSuperseded(pendingRaw, latestCheckDate));
+        if (pendingRaw && latestCheckDate && daysSinceCheck !== null && daysSinceCheck < recurrenceDays && !linkAfterCheck) {
+            supersededLinkKeys.push(...contractLookupKeys, ..._vcDocIdentityKeys(pendingRaw));
+        }
+        if (latestCheckDate && daysSinceCheck !== null && daysSinceCheck < recurrenceDays) {
+            return linkAfterCheck;
+        }
+        return true;
+    });
+
+    const rows = [];
+    elegiveis.forEach(c => {
+        const contractId = c.saleId || c.contractId || c.id;
+        let fallbackTitle = contractId;
+        if (c.billIds && c.billIds.length > 0) fallbackTitle = c.billIds[0];
+        const tituloKey = c.saleCode || c.contractCode || c.titulo || c.codigo || fallbackTitle;
+        const realSaleIdStr = String(c.realSaleId || '');
+        const contractNumberStr = String(c.contractNumber || '');
+        const contractLookupKeys = _vcClientLookupKeys(c);
+
+        const hasConstruction = contractLookupKeys.some(k => completedChecksByContract[k]);
+        const vistoriaAtiva = _vcResolvePendingVistoria(
+            contractLookupKeys,
+            checksByContract,
+            latestCheckDateByContract
+        );
+        if (hasConstruction && !_vcIsFollowupPending(vistoriaAtiva)) return;
+
+        const costCenterId = _vcExtractCostCenterId(c);
+        const city = _vcGetCity(costCenterId);
+        const empreendimento = _vcEmpNameFromCc(costCenterId) || '-';
+        const empLabel = _vcGetEmpLabel(costCenterId);
+
+        const unidade = c.unitName || c.unit || c.unidade || contractId || '-';
+        const latestCheckDate = _vcLatestDateAmong(contractLookupKeys, latestCheckDateByContract);
+        const daysSinceRecentCheck = _vcDaysSince(latestCheckDate);
+        if (daysSinceRecentCheck !== null && daysSinceRecentCheck < recurrenceDays && !vistoriaAtiva) return;
+
+        // Dados financeiros do cliente
+        const clienteName = c.customerName || c.name || c.nome || '-';
+        const titulo = tituloKey || '-';
+        const parcelasVencidas = parseInt(c.billCount || c.overdueInstallments || c.parcelasVencidas || 0);
+        const valorVencido = parseFloat((c.overdueValue || 0) + (c.overdueCharges || 0));
+
+        let statusLabel = 'Pendente de Vistoria';
+        let statusColor = 'color: #dc2626; font-weight: bold;';
+        let solicitadoHa = '';
+
+        if (_vcIsFollowupPending(vistoriaAtiva)) {
+            if (vistoriaAtiva.status === 'aguardando_fotos') {
+                statusLabel = 'Link Enviado – Aguardando Fotos';
+                statusColor = 'color: #d97706; font-weight: 600;';
+                const reqDate = _vcTimestampToDateStr(vistoriaAtiva.createdAt)
+                    || _vcTimestampToDateStr(vistoriaAtiva.requestedAt)
+                    || _vcTimestampToDateStr(vistoriaAtiva.updatedAt);
+                const reqDays = reqDate ? _vcDaysSince(reqDate) : null;
+                if (reqDays === 0) solicitadoHa = 'Solicitado hoje';
+                else if (reqDays !== null) solicitadoHa = `Há ${reqDays} dia(s)`;
+            } else if (vistoriaAtiva.status === 'aguardando_validacao') {
+                statusLabel = 'Aguardando Validação';
+                statusColor = 'color: #7c3aed; font-weight: 600;';
+            }
+        } else if (hasConstruction) {
+            statusLabel = 'Construção Identificada (Dispensado)';
+            statusColor = 'color: #16a34a; font-weight: 600;';
+        }
+
+        let lastCheckDateStr = '-';
+        let lastCheckDays = '-';
+        const contractKeys = contractLookupKeys.slice();
+
+        let maxDate = latestCheckDate && latestCheckDate !== '1970-01-01' ? latestCheckDate : null;
+        contractLookupKeys.forEach(k => {
+            const d = latestCheckDateByContract[k];
+            if (d && d !== '1970-01-01') {
+                if (!maxDate || d > maxDate) maxDate = d;
+            }
+        });
+
+        if (maxDate) {
+            const parts = maxDate.split('T')[0].split('-');
+            if (parts.length === 3) lastCheckDateStr = `${parts[2]}/${parts[1]}/${parts[0]}`;
+
+            const dt = new Date(maxDate.split('T')[0] + 'T12:00:00');
+            const now = new Date();
+            now.setHours(12, 0, 0, 0);
+            const diffTime = now.getTime() - dt.getTime();
+            const diffDays = Math.floor(diffTime / (1000 * 60 * 60 * 24));
+            lastCheckDays = diffDays >= 0 ? `${diffDays} dia(s)` : 'Hoje';
+        }
+
+        rows.push({
+            customerId: c.customerId, contractId, cidade: city, costCenterId, companyId: c.companyId || '',
+            empreendimento, empLabel, unidade,
+            clienteName, titulo, tituloKey, contractNumberStr, realSaleIdStr,
+            parcelasVencidas, valorVencido, lastCheckDateStr, lastCheckDays,
+            statusLabel, statusColor, solicitadoHa, vistoriaAtiva, originalIdx: rows.length, hasConstruction, contractKeys,
+            subjudice: _vcClientIsSubjudice(c)
+        });
+    });
+
+    const seenPendingIds = new Set(rows.map(r => r.vistoriaAtiva && r.vistoriaAtiva.id).filter(Boolean));
+    const pendingDocs = [];
+    const seenDoc = new Set();
+    Object.values(checksByContract).forEach(docObj => {
+        if (!docObj || !docObj.id || seenDoc.has(docObj.id)) return;
+        seenDoc.add(docObj.id);
+        if (!_vcIsFollowupPending(docObj)) return;
+        pendingDocs.push(docObj);
+    });
+    pendingDocs.forEach(v => {
+        if (seenPendingIds.has(v.id)) return;
+        const vKeys = _vcDocIdentityKeys(v);
+        const existing = rows.find(r => {
+            if (r.vistoriaAtiva && r.vistoriaAtiva.id === v.id) return true;
+            const rk = r.contractKeys || [];
+            if (vKeys.some(k => rk.map(String).includes(String(k)))) return true;
+            const sameUnit = String(r.unidade || '').replace(/^Quadra-Lote:\s*/i, '').trim().toUpperCase()
+                === String(v.unidade || '').replace(/^Quadra-Lote:\s*/i, '').trim().toUpperCase();
+            return sameUnit && String(r.costCenterId || '') === String(v.costCenterId || '') && v.costCenterId;
+        });
+        if (existing) {
+            existing.vistoriaAtiva = v;
+            existing.hasConstruction = false;
+            if (v.subjudice === true || v.subjudice === 'S') existing.subjudice = true;
+            if (v.status === 'aguardando_validacao') {
+                existing.statusLabel = 'Aguardando Validação';
+                existing.statusColor = 'color: #7c3aed; font-weight: 600;';
+                existing.solicitadoHa = '';
+            } else {
+                existing.statusLabel = 'Link Enviado – Aguardando Fotos';
+                existing.statusColor = 'color: #d97706; font-weight: 600;';
+            }
+            seenPendingIds.add(v.id);
+            return;
+        }
+        const client = (clients || []).find(c => _vcClientLookupKeys(c).some(k => vKeys.includes(String(k))));
+        const costCenterId = v.costCenterId || (client && _vcExtractCostCenterId(client)) || '';
+        const city = v.cidade || (costCenterId && _vcGetCity(costCenterId)) || '-';
+        const empreendimento = v.empreendimento || _vcEmpNameFromCc(costCenterId) || '-';
+        const empLabel = _vcEmpLabelOf(costCenterId, empreendimento);
+        let statusLabel = 'Aguardando Validação';
+        let statusColor = 'color: #7c3aed; font-weight: 600;';
+        let solicitadoHa = '';
+        if (v.status === 'aguardando_fotos') {
+            statusLabel = 'Link Enviado – Aguardando Fotos';
+            statusColor = 'color: #d97706; font-weight: 600;';
+            const reqDate = _vcTimestampToDateStr(v.createdAt) || _vcTimestampToDateStr(v.requestedAt) || _vcTimestampToDateStr(v.updatedAt);
+            const reqDays = reqDate ? _vcDaysSince(reqDate) : null;
+            if (reqDays === 0) solicitadoHa = 'Solicitado hoje';
+            else if (reqDays !== null) solicitadoHa = `Há ${reqDays} dia(s)`;
+        }
+        const parcelasVencidas = client ? parseInt(client.billCount || client.overdueInstallments || 0) : 0;
+        const valorVencido = client ? parseFloat((client.overdueValue || 0) + (client.overdueCharges || 0)) : 0;
+        rows.push({
+            customerId: v.customerId || (client && client.customerId) || '',
+            contractId: v.contractId || (client && (client.saleId || client.contractId || client.id)) || '',
+            cidade: city,
+            costCenterId,
+            companyId: v.companyId || (client && client.companyId) || '',
+            empreendimento,
+            empLabel,
+            unidade: v.unidade || (client && (client.unitName || client.unit)) || '-',
+            clienteName: v.clienteName || (client && (client.customerName || client.name)) || '-',
+            titulo: v.titulo || v.tituloKey || '-',
+            tituloKey: v.tituloKey || v.titulo || '',
+            contractNumberStr: String(v.contractId || ''),
+            realSaleIdStr: '',
+            parcelasVencidas,
+            valorVencido,
+            lastCheckDateStr: '-',
+            lastCheckDays: '-',
+            statusLabel,
+            statusColor,
+            solicitadoHa,
+            vistoriaAtiva: v,
+            originalIdx: rows.length,
+            hasConstruction: false,
+            contractKeys: vKeys,
+            subjudice: _vcClientIsSubjudice(client) || v.subjudice === true || v.subjudice === 'S'
+        });
+        seenPendingIds.add(v.id);
+    });
+
+    rows.forEach((r, i) => r.originalIdx = i);
+    return { rows, supersededLinkKeys };
+}
+
+async function _vcSyncObrasFromCloud() {
+    if (!window.firebaseDb || !window.firebaseCollections || !window.firebaseCollections.getDoc) return;
+    try {
+        const snap = await window.firebaseCollections.getDoc(window.firebaseCollections.doc(window.firebaseDb, 'config', 'global'));
+        const exists = snap && (typeof snap.exists === 'function' ? snap.exists() : snap.exists);
+        if (!exists) return;
+        const cloudRaw = (snap.data() || {}).crm_obras_andamento;
+        if (!cloudRaw) return;
+        const cloud = typeof cloudRaw === 'string' ? cloudRaw : JSON.stringify(cloudRaw);
+        const local = localStorage.getItem('crm_obras_andamento') || '';
+        if (cloud !== local) localStorage.setItem('crm_obras_andamento', cloud);
+    } catch (e) {}
+}
+
+async function _vcClientsForVistoriaScreen() {
+    let clients = null;
+    const app = window.VerificarConstrucaoApp;
+    if (app && typeof app.lerClientesDoBatimento === 'function') {
+        try { clients = await app.lerClientesDoBatimento(); } catch (e) { clients = null; }
+    }
+    if (!clients || !clients.length) {
+        clients = window.rawClientList || (window.AppState && window.AppState.sales) || [];
+    }
+    return clients;
+}
+
 window._vcEmptySprintCounts = function() {
     return { enviar: 0, validar: 0, enviarSubjudice: 0, validarSubjudice: 0, at: Date.now() };
 };
@@ -2852,8 +2891,10 @@ window._vcUpdateSprintCountsFromRows = function(rows) {
 };
 
 window.refreshVistoriaSprintCounts = async function() {
-    if (window.VerificarConstrucaoApp && Array.isArray(window.VerificarConstrucaoApp.allRows) && window.VerificarConstrucaoApp.allRows.length) {
-        return window._vcUpdateSprintCountsFromRows(window.VerificarConstrucaoApp.allRows);
+    try { await _vcSyncObrasFromCloud(); } catch (e) {}
+    const app = window.VerificarConstrucaoApp;
+    if (app && app._rowsReady && Array.isArray(app.allRows)) {
+        return window._vcUpdateSprintCountsFromRows(app.allRows);
     }
     try {
         const counts = await window._vcComputeSprintCountsFallback();
@@ -2866,95 +2907,13 @@ window.refreshVistoriaSprintCounts = async function() {
 };
 
 window._vcComputeSprintCountsFallback = async function() {
-    const clients = window.rawClientList || (window.AppState && window.AppState.sales) || [];
-    const thresholdDays = _vcGetThreshold();
-    const recurrenceDays = _vcGetRecurrenceDays();
-    const obras = _vcReadObrasState();
-    const checksByContract = {};
-    const completedChecksByContract = {};
-    const latestCheckDateByContract = {};
-    const pendingDocs = [];
-
-    if (window.firebaseDb && window.firebaseCollections) {
-        try {
-            const { collection, getDocs, query, where } = window.firebaseCollections;
-            const q = query(collection(window.firebaseDb, 'vistorias'), where('status', '!=', 'concluida'));
-            const snap = await getDocs(q);
-            snap.forEach(docSnap => {
-                const data = { id: docSnap.id, ...docSnap.data() };
-                if (data.isTest) return;
-                pendingDocs.push(data);
-                _vcDocIdentityKeys(data).forEach(k => {
-                    if (!checksByContract[String(k)]) checksByContract[String(k)] = data;
-                });
-            });
-            const snapChecks = await getDocs(collection(window.firebaseDb, 'construction_checks'));
-            snapChecks.forEach(docSnap => {
-                const data = docSnap.data();
-                if (!data.stage || !String(data.stage).trim()) return;
-                const cDate = _vcTimestampToDateStr(data.date || data.createdAt) || '1970-01-01';
-                const keysToSet = _vcDocIdentityKeys(data);
-                if (!keysToSet.length && data.contractId) keysToSet.push(String(data.contractId));
-                keysToSet.forEach(key => {
-                    const prevDate = _vcTimestampToDateStr(latestCheckDateByContract[key]);
-                    if (!prevDate || cDate >= prevDate) {
-                        latestCheckDateByContract[key] = cDate;
-                        const stageUpper = String(data.stage).trim().toUpperCase();
-                        completedChecksByContract[key] = !(stageUpper === 'SEM CONSTRUÇÃO' || stageUpper === 'TERRAPLANAGEM' || stageUpper === 'SEM CONSTRUCAO');
-                    }
-                });
-            });
-        } catch (e) {}
-    }
-
-    const counts = window._vcEmptySprintCounts();
-    const bump = (kind, sj) => {
-        if (kind === 'enviar') {
-            if (sj) counts.enviarSubjudice += 1;
-            else counts.enviar += 1;
-        } else if (kind === 'validar') {
-            if (sj) counts.validarSubjudice += 1;
-            else counts.validar += 1;
-        }
-    };
-    const seenValidar = new Set();
-
-    clients.forEach(c => {
-        const keys = _vcClientLookupKeys(c);
-        const ccId = _vcExtractCostCenterId(c);
-        const empName = _vcEmpNameFromCc(ccId);
-        if (_vcResolveObraEntry(obras, ccId, empName).isOn) return;
-        const sj = _vcClientIsSubjudice(c);
-        const pendingRaw = keys.map(k => checksByContract[String(k)]).find(Boolean) || null;
-        if (_vcIsFollowupPending(pendingRaw)) {
-            if (pendingRaw.status === 'aguardando_validacao' && pendingRaw.id && !seenValidar.has(pendingRaw.id)) {
-                seenValidar.add(pendingRaw.id);
-                bump('validar', sj);
-            }
-            return;
-        }
-        const maxDelay = parseInt(c.maxDaysDelay) || 0;
-        if (maxDelay < thresholdDays) return;
-        const latestCheckDate = _vcLatestDateAmong(keys, latestCheckDateByContract);
-        const daysSinceCheck = _vcDaysSince(latestCheckDate);
-        if (latestCheckDate && daysSinceCheck !== null && daysSinceCheck < recurrenceDays) return;
-        if (keys.some(k => completedChecksByContract[k])) return;
-        bump('enviar', sj);
-    });
-
-    pendingDocs.forEach(v => {
-        if (!_vcIsFollowupPending(v) || v.status !== 'aguardando_validacao') return;
-        if (v.id && seenValidar.has(v.id)) return;
-        const ccId = v.costCenterId || '';
-        const empName = v.empreendimento || '';
-        if (_vcResolveObraEntry(obras, ccId, empName).isOn) return;
-        if (v.id) seenValidar.add(v.id);
-        const vKeys = _vcDocIdentityKeys(v);
-        const client = (clients || []).find(c => _vcClientLookupKeys(c).some(k => vKeys.includes(String(k))));
-        bump('validar', _vcClientIsSubjudice(client) || v.subjudice === true || v.subjudice === 'S');
-    });
-
-    return counts;
+    await _vcSyncObrasFromCloud();
+    const clients = await _vcClientsForVistoriaScreen();
+    const indexes = await _vcFetchVistoriaIndexes(false);
+    const built = _vcBuildVistoriaRows(clients, indexes, _vcGetThreshold(), _vcGetRecurrenceDays());
+    const rows = built.rows || [];
+    rows.forEach(r => _vcApplyPortfolioFinance(r));
+    return window._vcUpdateSprintCountsFromRows(rows);
 };
 
 window._vcCountPendentesEnvio = async function() {

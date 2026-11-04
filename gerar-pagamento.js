@@ -170,6 +170,280 @@ const GerarPagamentoApp = {
     overlay.querySelector("#gp-fechamento-ciente").addEventListener("click", fechar);
   },
 
+  perfilFold(name) {
+    return String(name || "")
+      .normalize("NFD").replace(/[\u0300-\u036f]/g, "")
+      .toUpperCase()
+      .replace(/[^A-Z0-9]+/g, " ")
+      .replace(/\s+/g, " ")
+      .trim();
+  },
+
+  /** Analista de Tesouraria I e II, e administrador. */
+  usuarioVeConferenciaLotes() {
+    let u = window.AppState && window.AppState.currentUser;
+    if (!u) {
+      try { u = JSON.parse(localStorage.getItem("crm_logged_user") || "null"); } catch (e) { u = null; }
+    }
+    if (!u) return false;
+    const imp = typeof window.crmImpersonacaoAtual === "function" ? window.crmImpersonacaoAtual() : null;
+    const efetivo = imp || u;
+    if (!imp && typeof window.isCrmAdministrator === "function" && window.isCrmAdministrator(u)) return true;
+    const n = this.perfilFold(efetivo.profile_name || efetivo.profile || efetivo.role || "");
+    if (n === "ADMINISTRADOR" || (typeof window.isCrmAdminProfileName === "function" && window.isCrmAdminProfileName(efetivo.profile_name || n))) return true;
+    return n.includes("ANALISTA") && n.includes("TESOURARIA") && /\b(I|II|1|2)\b/.test(n);
+  },
+
+  chaveConferenciaLotes(dia) {
+    const u = (window.AppState && window.AppState.currentUser) || {};
+    const quem = String(u.email || u.name || "op").toLowerCase();
+    return "crm_lotes_conf_" + quem + "_" + dia;
+  },
+
+  /** 15:30: pede para atualizar a situação dos lotes. Se o login for depois, abre na hora, uma vez no dia. */
+  agendarConferenciaLotes() {
+    if (this._confTimer) {
+      clearTimeout(this._confTimer);
+      this._confTimer = null;
+    }
+    if (!this.usuarioVeConferenciaLotes()) return;
+    const agora = new Date();
+    const alvo = new Date(agora.getFullYear(), agora.getMonth(), agora.getDate(), 15, 30, 0, 0);
+    let espera = alvo.getTime() - agora.getTime();
+    if (espera <= 0) {
+      this.abrirConferenciaLotes();
+      espera = alvo.getTime() + 86400000 - agora.getTime();
+    }
+    this._confTimer = setTimeout(() => this.agendarConferenciaLotes(), Math.max(1000, espera));
+  },
+
+  abrirConferenciaLotes() {
+    if (!this.usuarioVeConferenciaLotes()) return;
+    const hoje = this.iso(new Date());
+    try { if (localStorage.getItem(this.chaveConferenciaLotes(hoje)) === "ciente") return; } catch (e) {}
+    if (document.getElementById("gp-conf-lotes")) return;
+    const overlay = document.createElement("div");
+    overlay.id = "gp-conf-lotes";
+    overlay.setAttribute("role", "dialog");
+    overlay.setAttribute("aria-labelledby", "gp-conf-titulo");
+    overlay.style.cssText = "position:fixed;inset:0;z-index:2147483003;display:flex;align-items:center;justify-content:center;background:rgba(12,41,29,0.55);padding:16px;";
+    overlay.innerHTML = `<div style="background:#fff;border-radius:12px;width:100%;max-width:820px;max-height:88vh;display:flex;flex-direction:column;box-shadow:0 18px 40px rgba(0,0,0,0.22);border:1px solid rgba(16,84,54,0.12);font-family:inherit;">
+      <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;padding:16px 18px 0;">
+        <h2 id="gp-conf-titulo" style="margin:0;font-size:1.05rem;color:#105436;">Situação dos lotes</h2>
+        <button type="button" class="btn btn-fechar" id="gp-conf-fechar">Fechar</button>
+      </div>
+      <div style="padding:12px 18px 18px;overflow:auto;">
+        <p style="margin:0 0 14px;color:#1e293b;font-size:0.92rem;line-height:1.45;">Atualize a situação dos lotes para checar se algum pagamento do dia ainda não foi processado ou se algum título saiu de lote por recusa do banco.</p>
+        <button type="button" class="btn btn-primary" id="gp-conf-buscar">Buscar atualizações</button>
+        <p id="gp-conf-status" style="margin:10px 0 0;color:#64748b;font-size:0.82rem;"></p>
+        <section style="margin-top:18px;">
+          <h3 style="margin:0 0 8px;font-size:0.92rem;color:#0f172a;">Do dia ou vencidos, ainda sem processamento</h3>
+          <div id="gp-conf-abertos" style="color:#64748b;font-size:0.85rem;">A busca ainda não foi feita.</div>
+        </section>
+        <section style="margin-top:18px;">
+          <h3 style="margin:0 0 8px;font-size:0.92rem;color:#0f172a;">A vencer, fora do lote por recusa do banco</h3>
+          <div id="gp-conf-recusa" style="color:#64748b;font-size:0.85rem;">A busca ainda não foi feita.</div>
+        </section>
+      </div>
+    </div>`;
+    document.body.appendChild(overlay);
+    overlay.querySelector("#gp-conf-fechar").addEventListener("click", () => {
+      try { localStorage.setItem(this.chaveConferenciaLotes(hoje), "ciente"); } catch (e) {}
+      overlay.remove();
+    });
+    overlay.querySelector("#gp-conf-buscar").addEventListener("click", () => this.buscarAtualizacaoLotes());
+  },
+
+  async lerLotesGravados() {
+    const fc = window.firebaseCollections;
+    if (window.firebaseDb && fc && fc.getDocs) {
+      const snap = await fc.getDocs(fc.collection(window.firebaseDb, this.LOTES_COLLECTION));
+      const list = [];
+      snap.forEach((d) => list.push(Object.assign({ id: d.id }, d.data())));
+      return list.filter(Boolean);
+    }
+    return this.lotesLocal();
+  },
+
+  enviadoAoBanco(inst) {
+    if (!inst) return false;
+    const s = inst.sentToBank;
+    return s === true || s === 1 || s === "S" || s === "s" || s === "true" || s === "Sim";
+  },
+
+  parcelaNoLote(inst, numero) {
+    if (!inst || inst.batchNumber == null || inst.batchNumber === "" || !numero) return false;
+    return String(inst.batchNumber) === String(numero);
+  },
+
+  linhaConferencia(row) {
+    const nota = row.nota ? `<div style="font-size:0.75rem;color:#9a3412;margin-top:2px;">${this.esc(row.nota)}</div>` : "";
+    return `<div style="border:1px solid #e2e8f0;border-radius:8px;padding:10px 12px;background:#f8fafc;">
+      <div style="display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap;">
+        <strong style="color:#0f172a;">${this.esc(row.titulo)}/${this.esc(row.parcela || "1")} · ${this.esc(row.credor || "—")}</strong>
+        <span style="font-weight:700;color:#105436;">${this.money(row.valor)}</span>
+      </div>
+      <div style="font-size:0.8rem;color:#64748b;margin-top:4px;">Vencimento ${this.esc(this.dataBr(row.vencimento))}${row.baixa ? " · baixa " + this.esc(this.dataBr(row.baixa)) : ""}${row.lote ? " · lote nº " + this.esc(row.lote) : ""}</div>
+      ${nota}
+    </div>`;
+  },
+
+  pintarConferencia(id, rows, vazio) {
+    const box = document.getElementById(id);
+    if (!box) return;
+    if (!rows.length) {
+      box.style.color = "#64748b";
+      box.innerHTML = vazio;
+      return;
+    }
+    box.style.color = "";
+    box.innerHTML = `<div style="display:flex;flex-direction:column;gap:8px;">${rows.map((r) => this.linhaConferencia(r)).join("")}</div>`;
+  },
+
+  /** Relê as parcelas dos lotes autorizados e separa o que o banco ainda não processou do que saiu do lote. */
+  async buscarAtualizacaoLotes() {
+    const btn = document.getElementById("gp-conf-buscar");
+    const status = document.getElementById("gp-conf-status");
+    if (!btn || btn.disabled) return;
+    btn.disabled = true;
+    btn.textContent = "Buscando…";
+    if (status) status.textContent = "Lendo os lotes gravados…";
+    const hoje = this.iso(new Date());
+    const desde = this.shiftIso(hoje, -60);
+    try {
+      const lotes = await this.lerLotesGravados();
+      const porChave = new Map();
+      const guardar = (lote, item, saiu) => {
+        const titulo = String((item && item.titulo) || "").trim();
+        if (!titulo) return;
+        const parcela = String((item && item.parcela) || "1");
+        const chave = titulo + "|" + parcela;
+        const st = lote && lote.sienge && lote.sienge.status;
+        const numero = lote && lote.sienge && lote.sienge.numero ? String(lote.sienge.numero) : "";
+        const autorizado = st === "aprovado" || st === "gerado" || !!numero;
+        const ativo = !saiu && autorizado && !lote.cancelado;
+        if (!ativo && !saiu) return;
+        const atual = porChave.get(chave);
+        const base = atual || {
+          titulo, parcela, credor: "", vencimento: "", valor: 0, baixa: "", lote: "", saiu: false, noLoteAtual: false, numero: ""
+        };
+        const baixa = String((lote && (lote.dataBaixa || lote.dia)) || "").slice(0, 10);
+        if (ativo) {
+          base.saiu = false;
+          base.noLoteAtual = true;
+          if (item && item.credor) base.credor = item.credor;
+          if (item && item.vencimento) base.vencimento = String(item.vencimento).slice(0, 10);
+          if (item && Number(item.valor) > 0) base.valor = Number(item.valor);
+          if (baixa) base.baixa = baixa;
+          if (numero) {
+            base.numero = numero;
+            base.lote = numero;
+          }
+        } else if (!base.noLoteAtual) {
+          base.saiu = true;
+          if (item && item.credor && !base.credor) base.credor = item.credor;
+          if (item && item.vencimento && !base.vencimento) base.vencimento = String(item.vencimento).slice(0, 10);
+          if (item && Number(item.valor) > 0 && !(base.valor > 0)) base.valor = Number(item.valor);
+          if (baixa && !base.baixa) base.baixa = baixa;
+          if (numero) {
+            base.numero = numero;
+            base.lote = numero;
+          }
+        }
+        porChave.set(chave, base);
+      };
+      (lotes || []).forEach((lote) => {
+        if (!lote) return;
+        const motivo = String(lote.canceladoMotivo || "");
+        const loteCaiu = !!lote.cancelado && /saiu|não existe mais no Sienge|nao existe mais no Sienge/i.test(motivo);
+        (lote.itens || []).forEach((item) => guardar(lote, item, loteCaiu));
+        ((lote.sienge && lote.sienge.historico) || []).forEach((h) => {
+          const msg = String((h && h.msg) || "");
+          const m = msg.match(/Títulos\s+(.+?)\s+saíram do lote/i);
+          if (!m) return;
+          m[1].split(",").forEach((par) => {
+            const pedacos = String(par || "").trim().split("/");
+            guardar(lote, { titulo: pedacos[0], parcela: pedacos[1] || "1" }, true);
+          });
+        });
+      });
+      const fila = [...porChave.values()];
+      const porTitulo = new Map();
+      fila.forEach((row) => {
+        const lista = porTitulo.get(row.titulo) || [];
+        lista.push(row);
+        porTitulo.set(row.titulo, lista);
+      });
+      const ids = [...porTitulo.keys()];
+      let feitos = 0;
+      const instPorTitulo = new Map();
+      const worker = async () => {
+        while (ids.length) {
+          const id = ids.shift();
+          try {
+            const res = await window.siengeFetchWithRetry("/bills/" + encodeURIComponent(id) + "/installments", 1);
+            const lista = (res && (res.results || res.data)) || (Array.isArray(res) ? res : []);
+            instPorTitulo.set(id, lista);
+          } catch (e) {
+            instPorTitulo.set(id, null);
+          }
+          feitos += 1;
+          if (status) status.textContent = "Consultando parcelas no Sienge… " + feitos + " de " + porTitulo.size;
+          await new Promise((r) => setTimeout(r, 180));
+        }
+      };
+      if (typeof window.siengeFetchWithRetry === "function" && ids.length) {
+        await Promise.all([worker(), worker(), worker()]);
+      }
+      const abertos = [];
+      const recusas = [];
+      fila.forEach((row) => {
+        const lista = instPorTitulo.get(row.titulo);
+        const inst = Array.isArray(lista)
+          ? (lista.find((p) => String(p.installmentId) === String(row.parcela) || String(p.installmentNumber) === String(row.parcela)) || null)
+          : null;
+        if (Array.isArray(lista) && inst && this.parcelaQuitada(inst)) return;
+        const venc = String((inst && inst.dueDate) || row.vencimento || "").slice(0, 10);
+        const baixa = String(row.baixa || venc).slice(0, 10);
+        if (venc) row.vencimento = venc;
+        const noLote = inst ? this.parcelaNoLote(inst, row.numero) : false;
+        const saiu = inst
+          ? (!!row.numero && !noLote)
+          : (!!row.saiu && !row.noLoteAtual);
+        const aVencer = venc && venc > hoje;
+        const doDiaOuVencido = (baixa && baixa <= hoje && (!desde || baixa >= desde)) || (venc && venc <= hoje && (!desde || venc >= desde));
+        if (aVencer && saiu) {
+          row.nota = "Saiu do lote nº " + (row.numero || "—") + ". O banco recusou e o título ainda está para vencer.";
+          recusas.push(row);
+          return;
+        }
+        if (!doDiaOuVencido) return;
+        if (!inst && lista === null) {
+          row.nota = "Não foi possível ler a parcela no Sienge.";
+        } else if (inst && this.enviadoAoBanco(inst) && noLote) {
+          row.nota = "Arquivo já enviado ao banco. A parcela continua em aberto.";
+        } else if (saiu) {
+          row.nota = "Saiu do lote e o pagamento ainda não foi processado.";
+        } else {
+          row.nota = "Ainda sem processamento no banco.";
+        }
+        abertos.push(row);
+      });
+      const ordem = (a, b) => String(a.vencimento || "").localeCompare(String(b.vencimento || "")) || Number(a.titulo) - Number(b.titulo);
+      abertos.sort(ordem);
+      recusas.sort(ordem);
+      this.pintarConferencia("gp-conf-abertos", abertos, "Nenhum título do dia ou vencido sem processamento.");
+      this.pintarConferencia("gp-conf-recusa", recusas, "Nenhum título a vencer saiu de lote por recusa do banco.");
+      if (status) status.textContent = abertos.length + " sem processamento · " + recusas.length + " fora do lote por recusa.";
+    } catch (e) {
+      if (status) status.textContent = (e && e.message) ? e.message : "Não consegui atualizar a situação dos lotes.";
+    }
+    if (btn) {
+      btn.disabled = false;
+      btn.textContent = "Buscar atualizações";
+    }
+  },
+
   /** Sábado e domingo entram no lote da segunda: a baixa no banco é no dia útil. */
   diaDoLote(iso) {
     const s = String(iso || "").slice(0, 10);
@@ -773,6 +1047,68 @@ const GerarPagamentoApp = {
     if (!s.erroTitulos) this.validarPagamentos(gen);
   },
 
+  /** Baixa que quita o título: pagamento (1) ou adiantamento (10). Abatimento não quita. */
+  baixaQuita(pay) {
+    if (!pay || typeof pay !== "object") return false;
+    const id = String(pay.operationTypeId != null ? pay.operationTypeId : "").trim();
+    const nome = String(pay.operationTypeName || pay.operationName || "")
+      .normalize("NFD").replace(/[\u0300-\u036f]/g, "").toUpperCase().trim();
+    if (/ABATIMENTO|CANCEL|ESTORNO|SUBSTITU/.test(nome)) return false;
+    if (id === "1" || id === "10") return true;
+    if (nome === "PAGAMENTO" || nome.indexOf("PAGAMENTO") === 0) return true;
+    if (nome === "ADIANTAMENTO" || nome.indexOf("ADIANTAMENTO") === 0) return true;
+    return /BAIXA|LIQUID|QUITAC/.test(nome);
+  },
+
+  valorBaixa(pay) {
+    const n = (v) => {
+      const x = Number(v);
+      return Number.isFinite(x) ? Math.abs(x) : null;
+    };
+    const liquido = n(pay && pay.netAmount);
+    if (liquido != null) return liquido;
+    const corrigido = n(pay && pay.correctedNetAmount);
+    if (corrigido != null) return corrigido;
+    const bruto = n(pay && pay.grossAmount);
+    if (bruto != null) return bruto;
+    const movs = pay && pay.bankMovements;
+    const lista = Array.isArray(movs) ? movs : (movs ? [movs] : []);
+    return lista.reduce((t, bm) => t + (n(bm && (bm.bankMovementAmount != null ? bm.bankMovementAmount : bm.amount)) || 0), 0);
+  },
+
+  /** Parcela do GET /bills/{id}/installments já paga, como a situação PG da consulta do Sienge. */
+  parcelaQuitada(p) {
+    if (!p || typeof p !== "object") return false;
+    const fold = (s) => String(s || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toUpperCase().trim();
+    const sit = fold([
+      p.situation, p.status, p.installmentStatus, p.paymentStatus, p.billStatus, p.installmentSituation
+    ].filter((v) => v != null && v !== "").join(" "));
+    if (sit === "PG" || /\b(PG|PAGO|PAGA|LIQUIDADO|QUITADO|PAID|SETTLED|BAIXADO)\b/.test(sit)) return true;
+    const saldoCampos = ["balanceAmount", "correctedBalanceAmount", "balance", "openBalance", "outstandingBalance", "currentBalance", "remainingAmount"];
+    const saldos = saldoCampos
+      .filter((k) => p[k] != null && p[k] !== "")
+      .map((k) => Number(p[k]))
+      .filter((n) => Number.isFinite(n));
+    if (saldos.length && saldos.every((n) => n <= 0.009)) return true;
+    return false;
+  },
+
+  marcarParcelaPaga(billId, numeros) {
+    const ids = (numeros || []).filter((n) => n != null && n !== "").map((n) => String(n));
+    if (!ids.length) return false;
+    let mudou = false;
+    (this.state.titulos || []).forEach((r) => {
+      if (!r || String(r.titulo) !== String(billId) || ids.indexOf(String(r.parcela)) < 0) return;
+      if (r.pago && !(Number(r.aPagar) > 0.009)) return;
+      r.pago = true;
+      r.aPagar = 0;
+      r.tituloAPagar = 0;
+      r.saldo = 0;
+      mudou = true;
+    });
+    return mudou;
+  },
+
   montarTitulos(app, bills, parceiros) {
     const ccMap = {};
     parceiros.forEach((cc) => { ccMap[String(cc.id)] = cc; });
@@ -812,7 +1148,9 @@ const GerarPagamentoApp = {
       }
       const movs = [];
       let pago = false;
+      let quitadoPorBaixa = 0;
       lista(bill.payments).forEach((pay) => {
+        if (this.baixaQuita(pay)) quitadoPorBaixa += this.valorBaixa(pay);
         const bms = lista(pay && pay.bankMovements);
         if (!bms.length) {
           if (app.isPago(bill, pay, null, docId, docNome)) pago = true;
@@ -826,8 +1164,14 @@ const GerarPagamentoApp = {
           if (conta) movs.push({ conta, data: app.paymentDateOf(bill, pay, bm) });
         });
       });
-      const saldo = app.billBalance(bill);
       const original = Number(bill.originalAmount) || 0;
+      let saldo = app.billBalance(bill);
+      if (original > 0.009 && quitadoPorBaixa >= original - 0.02) {
+        pago = true;
+        saldo = 0;
+      } else if (saldo != null && saldo <= 0.009) {
+        pago = true;
+      }
       const ccsTitulo = [];
       lista(bill.paymentsCategories).forEach((c) => {
         if (!c || c.costCenterId == null) return;
@@ -958,6 +1302,7 @@ const GerarPagamentoApp = {
           parcelas.forEach((p) => {
             const num = p.installmentId != null ? p.installmentId : p.installmentNumber;
             if (num == null) return;
+            if (this.parcelaQuitada(p)) this.marcarParcelaPaga(billId, [p.installmentId, p.installmentNumber, num]);
             s.formaSienge[this.chaveTitulo(billId, num)] = {
               tipo: String(p.paymentType || ""),
               tipoId: p.paymentTypeId != null ? String(p.paymentTypeId) : "",
@@ -978,7 +1323,10 @@ const GerarPagamentoApp = {
       }
     };
     await Promise.all([worker(), worker(), worker()]);
-    if (gen === s.gen) await this.conferirLotesExcluidosNoSienge();
+    if (gen === s.gen) {
+      this.reclassificar();
+      await this.conferirLotesExcluidosNoSienge();
+    }
   },
 
   /**
@@ -4380,4 +4728,18 @@ window.contaPagamentoDoCentroCusto = function (input) {
 
 document.addEventListener("tabChanged", function (e) {
   if (e && e.detail === "gerar-pagamento") GerarPagamentoApp.init();
+});
+
+document.addEventListener("DOMContentLoaded", function () {
+  let tentativas = 0;
+  const tentar = function () {
+    tentativas += 1;
+    const app = window.GerarPagamentoApp;
+    if (!app || typeof app.agendarConferenciaLotes !== "function" || !app.usuarioVeConferenciaLotes()) {
+      if (tentativas < 20) setTimeout(tentar, 1000);
+      return;
+    }
+    app.agendarConferenciaLotes();
+  };
+  setTimeout(tentar, 2000);
 });
