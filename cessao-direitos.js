@@ -3122,14 +3122,23 @@ const CessaoPopup = {
     if (!window.DocAssinaturaApp || typeof DocAssinaturaApp.registrar !== "function") return;
     const st = CessaoPopupState;
     const ces = (st.cessionarios && st.cessionarios[0] && st.cessionarios[0].customer) || {};
-    const titular = st.customer || {};
+    const principal = (st.cedentes || []).find((c) => c && (c.main || c.cede)) || (st.cedentes || [])[0] || null;
+    const titular = st.customer || (principal && principal.customer) || {};
+    const cedenteNome = String(
+      titular.name || (principal && principal.name) || (st.ctx && st.ctx.nome) || ""
+    ).trim();
+    const cedenteId = String(
+      titular.id || titular.customerId || (principal && principal.id) || (st.ctx && st.ctx.customerId) || ""
+    ).replace(/\D/g, "");
     const unidade = [st.unit && st.unit.costCenterId, st.quadraLote].filter((x) => x && x !== "—").join(" - ");
     const cc = String((st.unit && st.unit.costCenterId) || (st.contract && st.contract.enterpriseId) || "").replace(/\D/g, "");
     DocAssinaturaApp.registrar({
       tipo: "cessao",
-      cliente: ces.name || titular.name || "",
-      titularId: titular.id || titular.customerId || (st.ctx && st.ctx.customerId) || "",
-      titularNome: titular.name || (st.ctx && st.ctx.nome) || "",
+      cliente: cedenteNome || ces.name || "",
+      cedenteNome: cedenteNome,
+      cessionario: ces.name || "",
+      titularId: cedenteId,
+      titularNome: cedenteNome,
       titulo: st.titulo || "",
       unidade,
       arquivo: arquivo || "",

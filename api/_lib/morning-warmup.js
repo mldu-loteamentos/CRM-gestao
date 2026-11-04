@@ -54,7 +54,7 @@ async function runDistratoFollowup() {
   return marcarBaixados({
     db: db,
     siengeFetch: siengePorCaminho,
-    fx: { collection: collection, getDocs: getDocs, doc: doc, updateDoc: updateDoc }
+    fx: { collection: collection, getDocs: getDocs, doc: doc, getDoc: getDoc, updateDoc: updateDoc }
   });
 }
 
@@ -88,6 +88,7 @@ async function dispararCredores(req) {
   }
 }
 
+/** Distrato, cessão e aditamento pendentes entram no mesmo batimento das 7h. */
 async function dispararDistratoFollowup(req) {
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), 2500);

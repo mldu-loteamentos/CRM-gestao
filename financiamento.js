@@ -53,6 +53,7 @@ const FinanciamentoApp = {
     root.innerHTML = noFluxo ? this.fluxoHtml() : (this.abasHtml(painel) + (painel === "esteira" ? this.esteiraHtml() : this.buscaHtml()));
     if (window.lucide) lucide.createIcons();
     if (!noFluxo && painel === "pesquisa") this.restoreBuscaUi();
+    if (noFluxo) this.prepararTagsUnidade();
   },
 
   setPainel(id) {
@@ -692,7 +693,9 @@ const FinanciamentoApp = {
         contractNumber: contractNumber || "",
         customerName: customer.name || "",
         unit: this.formatUnidade(contract.unitName || contract.unityName || contract.unitId || ""),
-        empId: contract.enterpriseId || "",
+        empId: contract.enterpriseId || contract.costCenterId || "",
+        costCenterId: String(contract.costCenterId || contract.enterpriseId || ""),
+        unitName: String(contract.unitName || contract.unityName || contract.unitId || ""),
         startedAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),
         currentStageId: null,
@@ -860,6 +863,218 @@ const FinanciamentoApp = {
     </button>`;
   },
 
+  ehFeriado(iso) {
+    if (window.EscalaHomeOffice && typeof window.EscalaHomeOffice.ehFeriado === "function") {
+      return window.EscalaHomeOffice.ehFeriado(iso);
+    }
+    const ano = Number(String(iso).slice(0, 4));
+    const fixos = ["01-01", "04-21", "05-01", "09-07", "10-12", "11-02", "11-15", "11-20", "12-25"];
+    if (fixos.some((md) => iso === ano + "-" + md)) return true;
+    const a = ano % 19, b = Math.floor(ano / 100), c = ano % 100;
+    const d = Math.floor(b / 4), e = b % 4, f = Math.floor((b + 8) / 25), g = Math.floor((b - f + 1) / 3);
+    const h = (19 * a + b - d - g + 15) % 30, i = Math.floor(c / 4), k = c % 4;
+    const l = (32 + 2 * e + 2 * i - h - k) % 7, m = Math.floor((a + 11 * h + 22 * l) / 451);
+    const mes = Math.floor((h + l - 7 * m + 114) / 31);
+    const dia = ((h + l - 7 * m + 114) % 31) + 1;
+    const pascoa = ano + "-" + String(mes).padStart(2, "0") + "-" + String(dia).padStart(2, "0");
+    return [this.somarDias(pascoa, -48), this.somarDias(pascoa, -47), this.somarDias(pascoa, -2), this.somarDias(pascoa, 60)].indexOf(iso) >= 0;
+  },
+
+  ehDiaUtil(iso) {
+    const dia = new Date(String(iso).slice(0, 10) + "T12:00:00").getDay();
+    if (dia === 0 || dia === 6) return false;
+    return !this.ehFeriado(iso);
+  },
+
+  segundaDaSemana(iso) {
+    const dia = new Date(String(iso).slice(0, 10) + "T12:00:00").getDay();
+    const volta = dia === 0 ? 6 : dia - 1;
+    return this.somarDias(iso, -volta);
+  },
+
+  /* Segunda, ou o próximo dia útil se a segunda não for dia útil. */
+  diaAlertaEsteira(hoje) {
+    let d = this.segundaDaSemana(hoje);
+    let guarda = 0;
+    while (!this.ehDiaUtil(d) && guarda < 12) {
+      d = this.somarDias(d, 1);
+      guarda += 1;
+    }
+    return d;
+  },
+
+  usuarioVeAlertaEsteira() {
+    let u = window.AppState && window.AppState.currentUser;
+    if (!u) {
+      try { u = JSON.parse(localStorage.getItem("crm_logged_user") || "null"); } catch (e) { u = null; }
+    }
+    if (!u) return false;
+    const imp = typeof window.crmImpersonacaoAtual === "function" ? window.crmImpersonacaoAtual() : null;
+    const efetivo = imp || u;
+    if (!imp && typeof window.isCrmAdministrator === "function" && window.isCrmAdministrator(u)) return true;
+    if (typeof window.isCrmAdminProfileName === "function" && window.isCrmAdminProfileName(efetivo.profile_name || efetivo.profile || efetivo.role || "")) return true;
+    return typeof window.isCobrancaBackOfficeUser === "function" && window.isCobrancaBackOfficeUser(efetivo);
+  },
+
+  chaveAlertaEsteira(segunda) {
+    const u = (window.AppState && window.AppState.currentUser) || {};
+    return "crm_fin_esteira_" + String(u.email || u.name || "op").toLowerCase() + "_" + segunda;
+  },
+
+  atrasadosEsteira() {
+    const etapas = this.catalogoEtapas().filter((s) => s && s.selectable !== false && !s.hasChildren);
+    return this.listOpenProcesses().map((row) => {
+      const etapa = etapas.find((s) => String(s.id) === String(row.proc && row.proc.currentStageId));
+      if (!etapa) return null;
+      const prazo = this.prazoEtapa(row.proc, etapa);
+      if (prazo.status !== "atrasado") return null;
+      return { row, etapa, prazo };
+    }).filter(Boolean).sort((a, b) => (a.prazo.restantes || 0) - (b.prazo.restantes || 0));
+  },
+
+  agendarAlertaEsteira() {
+    if (this._finAlertaTimer) {
+      clearTimeout(this._finAlertaTimer);
+      this._finAlertaTimer = null;
+    }
+    if (!this.usuarioVeAlertaEsteira()) return;
+    const hoje = this.hojeIso();
+    const alerta = this.diaAlertaEsteira(hoje);
+    if (hoje < alerta) {
+      const alvo = new Date(alerta + "T08:00:00");
+      this._finAlertaTimer = setTimeout(() => this.agendarAlertaEsteira(), Math.max(1000, alvo.getTime() - Date.now()));
+      return;
+    }
+    this.abrirAlertaEsteira();
+    const proxima = this.somarDias(this.segundaDaSemana(hoje), 7);
+    const quando = new Date(proxima + "T08:00:00");
+    this._finAlertaTimer = setTimeout(() => this.agendarAlertaEsteira(), Math.max(1000, quando.getTime() - Date.now()));
+  },
+
+  abrirAlertaEsteira() {
+    if (!this.usuarioVeAlertaEsteira()) return;
+    const hoje = this.hojeIso();
+    const alerta = this.diaAlertaEsteira(hoje);
+    if (hoje < alerta) return;
+    const chave = this.chaveAlertaEsteira(this.segundaDaSemana(hoje));
+    try { if (localStorage.getItem(chave) === "ciente") return; } catch (e) {}
+    const lista = this.atrasadosEsteira();
+    if (!lista.length || document.getElementById("fin-alerta")) return;
+    const linhas = lista.map((item) => {
+      const proc = item.row.proc || {};
+      const n = Math.abs(item.prazo.restantes || 0);
+      const safe = String(item.row.key).replace(/\\/g, "\\\\").replace(/'/g, "\\'");
+      return `<button type="button" class="fin-alerta-item" onclick="FinanciamentoApp.abrirDoAlerta('${safe}')">
+        <strong>${this.esc(proc.customerName || "—")}</strong>
+        <span>Contrato ${this.esc(proc.contractNumber || proc.contractId || "—")} · ${this.esc(this.formatUnidade(proc.unit || "—"))}</span>
+        <span>${this.esc(item.etapa.label || item.etapa.nome)} · venceu em ${this.esc(this.fmtDate(item.prazo.limite))} · ${n} dia${n === 1 ? "" : "s"}</span>
+      </button>`;
+    }).join("");
+    const overlay = document.createElement("div");
+    overlay.id = "fin-alerta";
+    overlay.setAttribute("role", "dialog");
+    overlay.setAttribute("aria-labelledby", "fin-alerta-titulo");
+    overlay.style.cssText = "position:fixed;inset:0;z-index:2147483004;display:flex;align-items:center;justify-content:center;background:rgba(12,41,29,0.55);padding:16px;";
+    overlay.innerHTML = `<div style="background:#fff;border-radius:12px;width:100%;max-width:640px;max-height:88vh;display:flex;flex-direction:column;box-shadow:0 18px 40px rgba(0,0,0,0.22);border:1px solid rgba(16,84,54,0.12);font-family:inherit;">
+      <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;padding:16px 18px 0;">
+        <h2 id="fin-alerta-titulo" style="margin:0;font-size:1.05rem;color:#105436;">Etapas vencidas na esteira</h2>
+        <button type="button" class="btn btn-fechar" id="fin-alerta-fechar">Fechar</button>
+      </div>
+      <div style="padding:12px 18px 18px;overflow:auto;">
+        <p style="margin:0 0 12px;color:#1e293b;font-size:0.92rem;line-height:1.45;">${lista.length} financiamento${lista.length === 1 ? "" : "s"} na esteira com a etapa atual fora do prazo.</p>
+        <div style="display:flex;flex-direction:column;gap:8px;">${linhas}</div>
+      </div>
+    </div>`;
+    document.body.appendChild(overlay);
+    const estilo = document.createElement("style");
+    estilo.textContent = "#fin-alerta .fin-alerta-item{display:flex;flex-direction:column;align-items:flex-start;gap:2px;text-align:left;width:100%;border:1px solid #fecaca;border-left:4px solid #b91c1c;background:#fff;border-radius:10px;padding:10px 12px;cursor:pointer;}#fin-alerta .fin-alerta-item strong{color:#0f172a;font-size:0.9rem;}#fin-alerta .fin-alerta-item span{color:#64748b;font-size:0.78rem;}";
+    overlay.appendChild(estilo);
+    overlay.querySelector("#fin-alerta-fechar").addEventListener("click", () => this.fecharAlertaEsteira(chave));
+  },
+
+  fecharAlertaEsteira(chave) {
+    try { localStorage.setItem(chave, "ciente"); } catch (e) {}
+    const pop = document.getElementById("fin-alerta");
+    if (pop) pop.remove();
+  },
+
+  async abrirDoAlerta(key) {
+    const hoje = this.hojeIso();
+    this.fecharAlertaEsteira(this.chaveAlertaEsteira(this.segundaDaSemana(hoje)));
+    if (typeof window.switchTab === "function") window.switchTab("financiamento", "Financiamento");
+    await this.abrirAberto(key);
+  },
+
+  async prepararTagsUnidade() {
+    if (window.AnexosApp && typeof window.AnexosApp.loadTagsAtivas === "function") {
+      try { await window.AnexosApp.loadTagsAtivas(); } catch (e) {}
+    }
+    const todas = (window.AnexosState && window.AnexosState.tagsAtivas) || [];
+    this._tagsUnidade = todas.filter((t) => {
+      if (window.AnexosApp && typeof window.AnexosApp.tagDestino === "function") return window.AnexosApp.tagDestino(t) === "Unidade";
+      return true;
+    });
+    document.querySelectorAll("select.fin-tag").forEach((sel) => {
+      const atual = sel.value;
+      if (!this._tagsUnidade.length) {
+        sel.innerHTML = '<option value="">Nenhuma tag de unidade</option>';
+        return;
+      }
+      sel.innerHTML = '<option value="">Escolha a tag</option>' + this._tagsUnidade.map((t) => `<option value="${this.esc(t.name)}">${this.esc(t.name)}</option>`).join("");
+      if (atual) sel.value = atual;
+    });
+  },
+
+  async enviarAnexo(stageId) {
+    const proc = FinanciamentoState.process;
+    const arq = document.getElementById("fin-arq-" + stageId);
+    const tagEl = document.getElementById("fin-tag-" + stageId);
+    const btn = document.getElementById("fin-env-" + stageId);
+    const st = document.getElementById("fin-st-" + stageId);
+    const file = arq && arq.files && arq.files[0];
+    const tag = tagEl && tagEl.value;
+    if (!proc) return;
+    if (!file || !tag) {
+      if (st) st.textContent = "Escolha o arquivo e a tag da unidade.";
+      return;
+    }
+    if (typeof window.anexosUploadUnitAttachment !== "function") {
+      if (st) st.textContent = "O envio de anexos da unidade não está disponível.";
+      return;
+    }
+    if (btn) { btn.disabled = true; btn.textContent = "Enviando…"; }
+    if (st) st.textContent = "";
+    try {
+      const resp = await window.anexosUploadUnitAttachment({
+        file: file,
+        tagLabel: tag,
+        costCenterId: proc.costCenterId || proc.empId,
+        unitName: proc.unitName || proc.unit,
+        sale: {
+          customerId: proc.customerId,
+          id: proc.contractId,
+          contractId: proc.contractId,
+          contractNumber: proc.contractNumber,
+          receivableBillId: proc.titulo,
+          costCenterId: proc.costCenterId || proc.empId,
+          unitName: proc.unitName || proc.unit
+        },
+        context: "financiamento"
+      });
+      proc.anexos = proc.anexos || {};
+      const lista = Array.isArray(proc.anexos[stageId]) ? proc.anexos[stageId] : [];
+      lista.push({ tag: tag, fileName: resp.fileName || file.name, em: new Date().toISOString(), unitId: resp.unitId || "" });
+      proc.anexos[stageId] = lista;
+      proc.updatedAt = new Date().toISOString();
+      this.saveProcess(proc);
+      FinanciamentoState.process = proc;
+      this.render();
+    } catch (e) {
+      if (st) st.textContent = (e && e.message) ? e.message : "Não consegui enviar o anexo para a unidade.";
+      if (btn) { btn.disabled = false; btn.textContent = "Enviar para a unidade"; }
+    }
+  },
+
   marcarEtapa(stageId) {
     const proc = FinanciamentoState.process;
     if (!proc) return;
@@ -905,17 +1120,30 @@ const FinanciamentoApp = {
           <h3 style="margin:0;font-size:1.05rem;color:var(--color-primary);">Etapas do financiamento</h3>
         </div>
         <div class="crm-card-content">
+          <p style="margin:0 0 12px;color:#64748b;font-size:0.82rem;">Em cada fase, escolha a tag e envie o arquivo. Ele sobe na hora para a unidade no Sienge.</p>
           ${!etapas.length ? '<p style="color:#64748b;">Nenhuma etapa cadastrada. Vá em Configurações → Etapas Financiamento.</p>' : etapas.map((s) => {
             const done = proc.done && proc.done[s.id];
             const isCurrent = String(current) === String(s.id);
             const bg = isCurrent ? "#ecfdf5" : (done ? "#f8fafc" : "#fff");
             const border = isCurrent ? "#86efac" : "#e2e8f0";
-            return `<div style="display:flex;align-items:center;justify-content:space-between;gap:12px;padding:12px 14px;border:1px solid ${border};background:${bg};border-radius:8px;margin-bottom:8px;">
-              <div>
-                <div style="font-weight:700;color:#0f172a;">${this.esc(s.label || s.nome)}</div>
-                <div style="font-size:0.78rem;color:#64748b;">${s.dias || 0} dias${done ? " · concluída em " + this.fmtDate(done) : ""}</div>
+            const sid = String(s.id).replace(/'/g, "");
+            const enviados = ((proc.anexos && proc.anexos[s.id]) || []).map((a) => `<li>${this.esc(a.tag)} · ${this.esc(a.fileName)} · ${this.esc(this.fmtDate(a.em))}</li>`).join("");
+            const anexo = s.hasChildren ? "" : `<div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-top:10px;">
+              <input type="file" id="fin-arq-${sid}" style="max-width:240px;font-size:0.8rem;">
+              <select id="fin-tag-${sid}" class="fin-tag form-control" style="max-width:240px;height:36px;"><option value="">Carregando tags…</option></select>
+              <button type="button" class="btn btn-primary btn-sm" id="fin-env-${sid}" onclick="FinanciamentoApp.enviarAnexo('${sid}')">Enviar para a unidade</button>
+              <p id="fin-st-${sid}" style="margin:0;flex-basis:100%;color:#b45309;font-size:0.78rem;"></p>
+              ${enviados ? `<ul style="margin:0;padding-left:18px;flex-basis:100%;color:#334155;font-size:0.78rem;">${enviados}</ul>` : ""}
+            </div>`;
+            return `<div style="padding:12px 14px;border:1px solid ${border};background:${bg};border-radius:8px;margin-bottom:8px;">
+              <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;">
+                <div>
+                  <div style="font-weight:700;color:#0f172a;">${this.esc(s.label || s.nome)}</div>
+                  <div style="font-size:0.78rem;color:#64748b;">${s.dias || 0} dias${done ? " · concluída em " + this.fmtDate(done) : ""}</div>
+                </div>
+                ${s.hasChildren ? "" : `<button type="button" class="btn ${isCurrent ? "btn-outline" : "btn-primary"} btn-sm" onclick="FinanciamentoApp.marcarEtapa('${sid}')">${isCurrent ? "Etapa atual" : "Marcar etapa"}</button>`}
               </div>
-              ${s.hasChildren ? "" : `<button type="button" class="btn ${isCurrent ? "btn-outline" : "btn-primary"} btn-sm" onclick="FinanciamentoApp.marcarEtapa('${String(s.id).replace(/'/g, "")}')">${isCurrent ? "Etapa atual" : "Marcar etapa"}</button>`}
+              ${anexo}
             </div>`;
           }).join("")}
         </div>
@@ -927,4 +1155,18 @@ window.FinanciamentoApp = FinanciamentoApp;
 
 document.addEventListener("tabChanged", (e) => {
   if (e.detail === "financiamento") FinanciamentoApp.init();
+});
+
+document.addEventListener("DOMContentLoaded", function () {
+  let tentativas = 0;
+  const tentar = function () {
+    tentativas += 1;
+    const app = window.FinanciamentoApp;
+    if (!app || typeof app.agendarAlertaEsteira !== "function" || !app.usuarioVeAlertaEsteira()) {
+      if (tentativas < 20) setTimeout(tentar, 1000);
+      return;
+    }
+    app.agendarAlertaEsteira();
+  };
+  setTimeout(tentar, 2000);
 });

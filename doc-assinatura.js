@@ -93,6 +93,8 @@ const DocAssinaturaApp = {
       centroNome: String((dados && dados.centroNome) || "").trim(),
       titularId: String((dados && dados.titularId) || "").replace(/\D/g, ""),
       titularNome: String((dados && dados.titularNome) || "").trim(),
+      cedenteNome: String((dados && (dados.cedenteNome || dados.titularNome)) || "").trim(),
+      cessionario: String((dados && dados.cessionario) || "").trim(),
       plano: String((dados && dados.plano) || ""),
       pdfUrl: "",
       userId: eu.userId,
@@ -124,6 +126,8 @@ const DocAssinaturaApp = {
         centroNome: row.centroNome,
         titularId: row.titularId,
         titularNome: row.titularNome,
+        cedenteNome: row.cedenteNome,
+        cessionario: row.cessionario,
         plano: row.plano,
         pdfUrl: "",
         userId: row.userId,
@@ -417,14 +421,20 @@ const DocAssinaturaApp = {
     return curto.length >= 8 && longo.indexOf(curto) === 0;
   },
 
-  /** Titular gravado na geração deixou de ser o cliente do título. Sem esse id, compara o nome da linha. */
+  /** Nome do cedente gravado na geração: o titular do título naquele instante. */
+  nomeCedente(row) {
+    return String((row && (row.cedenteNome || row.titularNome)) || "").trim();
+  },
+
+  /** A cessão foi feita quando o titular do título deixou de ser o cedente gravado. */
   cessaoMudou(row, atual) {
-    if (!row || !atual || !atual.id) return false;
+    if (!row || !atual) return false;
     const salvo = String(row.titularId || "").replace(/\D/g, "");
     const agora = String(atual.id || "").replace(/\D/g, "");
-    if (salvo) return salvo !== agora;
-    if (!atual.nome) return false;
-    return !this.mesmoNome(row.cliente, atual.nome);
+    if (salvo && agora) return salvo !== agora;
+    const base = this.nomeCedente(row) || String(row.cliente || "").trim();
+    if (!base || !atual.nome) return false;
+    return !this.mesmoNome(base, atual.nome);
   },
 
   planoDeParcelas(lista) {
@@ -575,13 +585,218 @@ const DocAssinaturaApp = {
     try { await this._reconciliando; } finally { this._reconciliando = null; }
   },
 
+  nomeExibido(row) {
+    if (row && row.tipo === "cessao") return this.nomeCedente(row) || String(row.cliente || "").trim() || "—";
+    return String((row && row.cliente) || "").trim() || "—";
+  },
+
+  hojeIso() {
+    return new Date().toLocaleDateString("en-CA", { timeZone: "America/Sao_Paulo" });
+  },
+
+  somarDias(iso, n) {
+    const d = new Date(String(iso).slice(0, 10) + "T12:00:00");
+    d.setDate(d.getDate() + n);
+    const mes = String(d.getMonth() + 1).padStart(2, "0");
+    const dia = String(d.getDate()).padStart(2, "0");
+    return d.getFullYear() + "-" + mes + "-" + dia;
+  },
+
+  ehFeriado(iso) {
+    if (window.EscalaHomeOffice && typeof window.EscalaHomeOffice.ehFeriado === "function") {
+      return window.EscalaHomeOffice.ehFeriado(iso);
+    }
+    const ano = Number(String(iso).slice(0, 4));
+    const fixos = ["01-01", "04-21", "05-01", "09-07", "10-12", "11-02", "11-15", "11-20", "12-25"];
+    return fixos.some((md) => iso === ano + "-" + md);
+  },
+
+  ehDiaUtil(iso) {
+    const dia = new Date(String(iso).slice(0, 10) + "T12:00:00").getDay();
+    if (dia === 0 || dia === 6) return false;
+    return !this.ehFeriado(iso);
+  },
+
+  /* Dias úteis decorridos depois da emissão, sem contar o próprio dia. */
+  diasUteisDesde(iso) {
+    const inicio = String(iso || "").slice(0, 10);
+    const hoje = this.hojeIso();
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(inicio) || inicio >= hoje) return 0;
+    let n = 0;
+    let d = this.somarDias(inicio, 1);
+    let guarda = 0;
+    while (d <= hoje && guarda < 400) {
+      if (this.ehDiaUtil(d)) n += 1;
+      d = this.somarDias(d, 1);
+      guarda += 1;
+    }
+    return n;
+  },
+
+  dataBr(iso) {
+    const p = String(iso || "").slice(0, 10).split("-");
+    if (p.length < 3 || p[0].length !== 4) return "—";
+    return p[2] + "/" + p[1] + "/" + p[0];
+  },
+
+  /* 5 e 6: só quem gerou. 7, 9, 11…: o perfil inteiro de quem gerou. */
+  marcoAlerta(dias) {
+    if (dias === 5 || dias === 6) return "responsavel";
+    if (dias >= 7 && (dias - 7) % 2 === 0) return "time";
+    return "";
+  },
+
+  usuarioEfetivo() {
+    const u = (typeof window.crmUsuarioAcesso === "function" && window.crmUsuarioAcesso()) || (window.AppState && window.AppState.currentUser) || null;
+    if (!u || !(u.email || u.name || u.nome)) return null;
+    return u;
+  },
+
+  perfilDe(user) {
+    if (!user) return "";
+    const direto = String(user.profile_name || user.profile || "").trim();
+    if (direto) return direto;
+    if (typeof window.findCrmRegisteredUser === "function") {
+      const rec = window.findCrmRegisteredUser(user.email || user);
+      if (rec && rec.profile_name) return String(rec.profile_name).trim();
+    }
+    return "";
+  },
+
+  mesmoPerfil(a, b) {
+    const norm = typeof window.normalizeCrmProfileName === "function"
+      ? window.normalizeCrmProfileName
+      : (s) => String(s || "").trim().toUpperCase();
+    const x = norm(a);
+    const y = norm(b);
+    return !!(x && y && x === y);
+  },
+
+  responsavelDe(row) {
+    const lista = typeof window.getCrmUsersList === "function" ? window.getCrmUsersList() : [];
+    const email = String((row && row.userEmail) || "").toLowerCase();
+    const nome = this.normNome(row && row.userName);
+    return lista.find((u) => {
+      const em = String((u && u.email) || "").toLowerCase();
+      if (email && em && email === em) return true;
+      return !!(nome && nome.length > 3 && this.normNome(u && (u.name || u.nome)) === nome);
+    }) || null;
+  },
+
+  souOResponsavel(row) {
+    const eu = this.usuarioEfetivo();
+    if (!eu || !row) return false;
+    const email = String(eu.email || "").toLowerCase();
+    if (email && row.userEmail && email === String(row.userEmail).toLowerCase()) return true;
+    const nome = this.normNome(eu.name || eu.nome);
+    return !!(nome && nome.length > 3 && nome === this.normNome(row.userName));
+  },
+
+  veAlerta(row, marco) {
+    if (!marco) return false;
+    if (this.souOResponsavel(row)) return true;
+    if (marco !== "time") return false;
+    const eu = this.usuarioEfetivo();
+    const dono = this.responsavelDe(row);
+    return this.mesmoPerfil(this.perfilDe(eu), this.perfilDe(dono) || this.perfilDe({ email: row.userEmail, profile_name: "" }));
+  },
+
+  chaveAlerta(row, dias) {
+    const eu = this.usuarioEfetivo() || {};
+    const quem = String(eu.email || eu.name || eu.nome || "op").toLowerCase();
+    return "crm_docs_pend_" + quem + "_" + String((row && row.id) || "") + "_" + dias;
+  },
+
+  alertaVisto(row, dias) {
+    try { return localStorage.getItem(this.chaveAlerta(row, dias)) === "ciente"; } catch (e) { return false; }
+  },
+
+  async garantirItens() {
+    if (this.itens && this.itens.length) return;
+    let nuvem = [];
+    try {
+      if (window.firebaseDb && window.firebaseCollections && window.firebaseCollections.getDocs) {
+        const { collection, getDocs } = window.firebaseCollections;
+        const snap = await getDocs(collection(window.firebaseDb, this.COL));
+        snap.forEach((d) => nuvem.push(Object.assign({ id: d.id }, d.data() || {})));
+      }
+    } catch (e) {}
+    this.itens = this.unir(nuvem, this.lerLocal());
+  },
+
+  pendentesParaAlertar() {
+    return (this.itens || []).filter((row) => {
+      if (!row || row.status === "lancado") return false;
+      const dias = this.diasUteisDesde(row.createdAt);
+      const marco = this.marcoAlerta(dias);
+      if (!marco || this.alertaVisto(row, dias)) return false;
+      return this.veAlerta(row, marco);
+    }).map((row) => ({ row: row, dias: this.diasUteisDesde(row.createdAt) }));
+  },
+
+  async avisarPendentes() {
+    if (this._avisando) return this._avisando;
+    if (!this.usuarioEfetivo() || document.getElementById("docs-pend-alerta")) return;
+    this._avisando = (async () => {
+      await this.garantirItens();
+      try { await this.reconciliarDistratos(); } catch (e) {}
+      const lista = this.pendentesParaAlertar();
+      if (!lista.length || document.getElementById("docs-pend-alerta")) return;
+      this.abrirAlertaPendentes(lista);
+    })();
+    try { await this._avisando; } finally { this._avisando = null; }
+  },
+
+  fraseAlerta(item) {
+    const row = item.row;
+    const quem = this.nomeExibido(row);
+    const titulo = String(row.titulo || "").trim();
+    const doc = this.tipoLabel(row.tipo);
+    const quando = this.dataBr(row.createdAt);
+    const doCliente = quem && quem !== "—" ? " de " + quem : "";
+    const doTitulo = titulo && titulo !== "—" ? ", título " + titulo : "";
+    return "O documento " + doc + doCliente + doTitulo + " foi emitido em " + quando + " e não foi concluído no Sienge ainda.";
+  },
+
+  abrirAlertaPendentes(lista) {
+    if (!lista.length || document.getElementById("docs-pend-alerta")) return;
+    const linhas = lista.map((item) => `<p class="docs-pend-item">${this.esc(this.fraseAlerta(item))}</p>`).join("");
+    const overlay = document.createElement("div");
+    overlay.id = "docs-pend-alerta";
+    overlay.setAttribute("role", "dialog");
+    overlay.setAttribute("aria-labelledby", "docs-pend-titulo");
+    overlay.style.cssText = "position:fixed;inset:0;z-index:2147483004;display:flex;align-items:center;justify-content:center;background:rgba(12,41,29,0.55);padding:16px;";
+    overlay.innerHTML = `<div style="background:#fff;border-radius:12px;width:100%;max-width:640px;max-height:88vh;display:flex;flex-direction:column;box-shadow:0 18px 40px rgba(0,0,0,0.22);border:1px solid rgba(16,84,54,0.12);font-family:inherit;">
+      <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;padding:16px 18px 0;">
+        <h2 id="docs-pend-titulo" style="margin:0;font-size:1.05rem;color:#105436;">Documentos sem conclusão no Sienge</h2>
+        <button type="button" class="btn btn-fechar" id="docs-pend-fechar">Fechar</button>
+      </div>
+      <div style="padding:12px 18px 18px;overflow:auto;">
+        <div style="display:flex;flex-direction:column;gap:8px;">${linhas}</div>
+      </div>
+    </div>`;
+    const estilo = document.createElement("style");
+    estilo.textContent = "#docs-pend-alerta .docs-pend-item{margin:0;padding:10px 12px;border:1px solid #fde68a;border-left:4px solid #d97706;background:#fffbeb;border-radius:10px;color:#1e293b;font-size:0.9rem;line-height:1.45;}";
+    overlay.appendChild(estilo);
+    document.body.appendChild(overlay);
+    overlay.querySelector("#docs-pend-fechar").addEventListener("click", () => this.fecharAlertaPendentes(lista));
+  },
+
+  fecharAlertaPendentes(lista) {
+    (lista || []).forEach((item) => {
+      try { localStorage.setItem(this.chaveAlerta(item.row, item.dias), "ciente"); } catch (e) {}
+    });
+    const pop = document.getElementById("docs-pend-alerta");
+    if (pop) pop.remove();
+  },
+
   ordenar(lista) {
     const dir = this.sortDir === "asc" ? 1 : -1;
     const key = this.sortKey;
     const val = (row) => {
       if (key === "quando") return String(row.createdAt || "");
       if (key === "tipo") return this.tipoLabel(row.tipo);
-      if (key === "cliente") return String(row.cliente || "");
+      if (key === "cliente") return this.nomeExibido(row);
       if (key === "titulo") return String(row.titulo || "");
       if (key === "unidade") return String(row.unidade || "");
       if (key === "quem") return String(row.userName || "");
@@ -636,7 +851,7 @@ const DocAssinaturaApp = {
       return `<tr>
             <td>${this.esc(this.quando(r.createdAt))}</td>
             <td>${this.esc(this.tipoLabel(r.tipo))}</td>
-            <td>${this.esc(r.cliente || "—")}</td>
+            <td>${this.esc(this.nomeExibido(r))}</td>
             <td>${this.esc(r.titulo || "—")}</td>
             <td>${this.esc(this.rotuloUnidade(r))}</td>
             <td>${this.esc(r.userName || "—")}${this.mesmoUsuario(r) ? ` <span class="docs-voce">você</span>` : ""}</td>
@@ -689,4 +904,18 @@ window.DocAssinaturaApp = DocAssinaturaApp;
 
 document.addEventListener("tabChanged", (e) => {
   if (e.detail === "relacionamento_assinaturas") DocAssinaturaApp.abrir();
+});
+
+document.addEventListener("DOMContentLoaded", function () {
+  let tentativas = 0;
+  const tentar = function () {
+    tentativas += 1;
+    const app = window.DocAssinaturaApp;
+    if (!app || typeof app.avisarPendentes !== "function" || !app.usuarioEfetivo()) {
+      if (tentativas < 20) setTimeout(tentar, 1000);
+      return;
+    }
+    app.avisarPendentes();
+  };
+  setTimeout(tentar, 2500);
 });

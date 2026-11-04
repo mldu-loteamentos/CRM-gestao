@@ -5157,6 +5157,12 @@ async function processSuccessfulLogin(loggedUser) {
       if (window.EscalaHomeOffice && typeof window.EscalaHomeOffice.avisar === "function") {
         window.EscalaHomeOffice.avisar();
       }
+      if (window.FinanciamentoApp && typeof window.FinanciamentoApp.agendarAlertaEsteira === "function") {
+        window.FinanciamentoApp.agendarAlertaEsteira();
+      }
+      if (window.DocAssinaturaApp && typeof window.DocAssinaturaApp.avisarPendentes === "function") {
+        window.DocAssinaturaApp.avisarPendentes();
+      }
       if (typeof window.avisarRepactuacaoUltimoDia === "function") {
         window.avisarRepactuacaoUltimoDia();
       }
