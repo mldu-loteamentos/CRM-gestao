@@ -20,7 +20,7 @@ const GerarPagamentoApp = {
     titulos: [],
     previsoesIgnoradas: 0,
     filtro: "todos",
-    visao: "titulos",
+    visao: "lotes",
     abaLotes: "gerar",
     ordemLotes: "baixa-desc",
     abaEmpresa: "",
@@ -1149,16 +1149,17 @@ const GerarPagamentoApp = {
       const movs = [];
       let pago = false;
       let quitadoPorBaixa = 0;
+      let temBaixa = false;
       lista(bill.payments).forEach((pay) => {
-        if (this.baixaQuita(pay)) quitadoPorBaixa += this.valorBaixa(pay);
+        const quita = this.baixaQuita(pay);
+        if (quita) quitadoPorBaixa += this.valorBaixa(pay);
+        if (quita && app.paymentDateOf(bill, pay, null)) temBaixa = true;
         const bms = lista(pay && pay.bankMovements);
-        if (!bms.length) {
-          if (app.isPago(bill, pay, null, docId, docNome)) pago = true;
-          return;
-        }
+        if (!bms.length) return;
         bms.forEach((bm) => {
           if (!bm || app.SKIP_OPS[bm.operationName || ""]) return;
           if (app.isSubstituicao(bill, pay, bm, docId, docNome)) return;
+          temBaixa = true;
           if (app.isPago(bill, pay, bm, docId, docNome)) pago = true;
           const conta = String(bm.accountNumber || "").trim();
           if (conta) movs.push({ conta, data: app.paymentDateOf(bill, pay, bm) });
@@ -1166,11 +1167,15 @@ const GerarPagamentoApp = {
       });
       const original = Number(bill.originalAmount) || 0;
       let saldo = app.billBalance(bill);
-      if (original > 0.009 && quitadoPorBaixa >= original - 0.02) {
+      const quitou = original > 0.009 && quitadoPorBaixa >= original - 0.02 && temBaixa;
+      if (quitou) {
         pago = true;
         saldo = 0;
-      } else if (saldo != null && saldo <= 0.009) {
+      } else if (temBaixa && saldo != null && saldo <= 0.009) {
         pago = true;
+      } else if (!temBaixa) {
+        pago = false;
+        if (saldo != null && saldo <= 0.009) saldo = null;
       }
       const ccsTitulo = [];
       lista(bill.paymentsCategories).forEach((c) => {
@@ -3767,31 +3772,20 @@ const GerarPagamentoApp = {
     const emLote = this.recortarGrupos(
       grupos.map((g) => ({ ...g, key: g.key + "#lote", itens: g.itens.filter((it) => it.emLote) })).filter((g) => g.itens.length),
       noPeriodo);
-    const aba = s.abaLotes === "lote" ? "lote" : "gerar";
-    const fonteEmpresa = s.diaRetro && aba !== "lote" ? aGerarRetro : (aba === "lote" ? emLote : aGerar);
-    const baseStatus = s.diaRetro && aba !== "lote" ? aGerarRetro : aGerar;
+    const fonteEmpresa = (s.diaRetro ? aGerarRetro : aGerar).concat(emLote);
+    const baseStatus = s.diaRetro ? aGerarRetro : aGerar;
     const abasEmpresa = this.abasEmpresaHtml(fonteEmpresa, baseStatus);
     const emp = this.state.abaEmpresa;
     const soEmpresa = (lista) => this.filtrarEmpresa(lista, emp);
     const aGerarVis = soEmpresa(aGerar);
-    const emLoteVis = soEmpresa(emLote);
     const retroVis = soEmpresa(aGerarRetro);
-    const nAGerar = aGerarVis.reduce((t, g) => t + g.itens.length, 0);
-    const nEmLote = emLoteVis.reduce((t, g) => t + g.itens.length, 0);
-    const abas = `<div class="ml-tabs gp-abas-lote" role="tablist">
-        <button type="button" role="tab" aria-selected="${aba === "gerar"}" class="ml-tab ${aba === "gerar" ? "is-active" : ""}" onclick="GerarPagamentoApp.setAbaLotes('gerar')"><i data-lucide="layers"></i> A gerar <span class="ml-tab-count">${nAGerar}</span></button>
-        <button type="button" role="tab" aria-selected="${aba === "lote"}" class="ml-tab ${aba === "lote" ? "is-active" : ""}" onclick="GerarPagamentoApp.setAbaLotes('lote')"><i data-lucide="check-circle-2"></i> Já em lote <span class="ml-tab-count">${nEmLote}</span></button>
-      </div>`;
-    const faixa = (extra) => `<div class="gp-faixa">${abasEmpresa}${abas}${extra || ""}</div>`;
+    const faixa = (extra) => `<div class="gp-faixa">${abasEmpresa}${extra || ""}</div>`;
     const vazio = (txt) => `<div style="padding:22px 20px;color:#64748b;font-size:0.85rem;">${txt}</div>`;
     const chaves = new Set(s.titulos.filter((r) => noPeriodo(String(r.vencimento || "").slice(0, 10))).map((r) => this.chaveTitulo(r.titulo, r.parcela)));
     const gerados = s.lotes
       .filter((l) => (l.itens || []).some((i) => chaves.has(this.chaveTitulo(i.titulo, i.parcela))))
       .filter((l) => !emp || this.empresaDoGrupo({ empresaConta: l.empresaConta, itens: l.itens || [] }) === emp)
       .sort((a, b) => String(b.criadoEm).localeCompare(String(a.criadoEm)));
-    if (aba === "lote") {
-      return `${faixa()}${this.painelLotesHtml(gerados)}${emLoteVis.length ? `<div class="gp-lotes-painel">${emLoteVis.map(card).join("")}</div>` : ""}`;
-    }
     const alerta = this.retroAlertaHtml(diasRetro);
     if (s.diaRetro) {
       const titulosRetro = retroVis.reduce((t, g) => t + g.itens.length, 0);
@@ -3806,7 +3800,10 @@ const GerarPagamentoApp = {
     const vazioPeriodo = this.state.titulos.some((r) => noPeriodo(String(r.vencimento || "").slice(0, 10)) && !r.pago && r.aPagar > 0.009)
       ? "Nenhum título a gerar lote nesta empresa no período: todos já estão em lote."
       : "Nenhum título em aberto com vencimento no período buscado.";
-    return `${this.conferenciaHtml()}${faixa()}${alerta}${aGerarVis.length ? this.resumoAGerarHtml(aGerarVis) + `<div class="gp-lotes-painel" style="margin-top:0;">${aGerarVis.map(card).join("")}</div>` : vazio(vazioPeriodo)}`;
+    const blocoAGerar = aGerarVis.length
+      ? this.resumoAGerarHtml(aGerarVis) + `<div class="gp-lotes-painel" style="margin-top:0;">${aGerarVis.map(card).join("")}</div>`
+      : vazio(vazioPeriodo);
+    return `${this.conferenciaHtml()}${faixa()}${alerta}${blocoAGerar}${this.painelLotesHtml(gerados)}`;
   },
 
   grupoStatus(r) {
@@ -4417,7 +4414,7 @@ const GerarPagamentoApp = {
     const nAbertos = new Set(s.titulos.filter((r) => !r.pago && r.aPagar > 0.009 && this.noPeriodoBuscado(String(r.vencimento || "").slice(0, 10)))
       .map((r) => this.chaveTitulo(r.titulo, r.parcela))).size;
     const visoes = `<div class="gp-visoes">
-        <button type="button" class="gp-visao${s.visao === "lotes" ? " is-active" : ""}" title="${s.visao === "lotes" ? "Voltar para a programação" : "Ver os lotes por conta e dia"}" onclick="GerarPagamentoApp.setVisao('${s.visao === "lotes" ? "titulos" : "lotes"}')"><i data-lucide="layers" style="width:14px;"></i> Lotes por conta e dia <b>${nAbertos}</b></button>
+        <button type="button" class="gp-visao${s.visao === "lotes" ? " is-active" : ""}" title="${s.visao === "lotes" ? "Ver a programação título a título" : "Ver lotes a gerar e lotes gerados"}" onclick="GerarPagamentoApp.setVisao('${s.visao === "lotes" ? "titulos" : "lotes"}')"><i data-lucide="${s.visao === "lotes" ? "table" : "layers"}" style="width:14px;"></i> ${s.visao === "lotes" ? "Programação" : "Lotes a gerar e gerados"} <b>${nAbertos}</b></button>
       </div>`;
     if (s.visao === "lotes") return visoes + this.lotesHtml();
     const todos = this.titulosAgrupados();
