@@ -4,15 +4,15 @@ const CentralEmailApp = {
   state: { templates: [], pronto: false, aba: "templates" },
 
   VARIAVEIS: [
-    { token: "{{primeiro_nome}}", label: "Primeiro nome" },
-    { token: "{{nome}}", label: "Nome completo" },
-    { token: "{{unidade}}", label: "Unidade" },
-    { token: "{{empreendimento}}", label: "Empreendimento" },
-    { token: "{{cidade}}", label: "Cidade" },
-    { token: "{{vencimento}}", label: "Vencimento" },
-    { token: "{{texto_abertas}}", label: "Parcelas em aberto" },
-    { token: "{{ordinal_proxima}}", label: "Próxima parcela" },
-    { token: "{{vencimento_proxima}}", label: "Vencimento da próxima" }
+    { token: "{{primeiro_nome}}", label: "Primeiro nome", grupo: "Cliente" },
+    { token: "{{nome}}", label: "Nome completo", grupo: "Cliente" },
+    { token: "{{unidade}}", label: "Unidade", grupo: "Imóvel" },
+    { token: "{{empreendimento}}", label: "Empreendimento", grupo: "Imóvel" },
+    { token: "{{cidade}}", label: "Cidade", grupo: "Imóvel" },
+    { token: "{{vencimento}}", label: "Vencimento", grupo: "Parcelas" },
+    { token: "{{texto_abertas}}", label: "Parcelas em aberto", grupo: "Parcelas" },
+    { token: "{{ordinal_proxima}}", label: "Próxima parcela", grupo: "Parcelas" },
+    { token: "{{vencimento_proxima}}", label: "Vencimento da próxima", grupo: "Parcelas" }
   ],
 
   EXEMPLO: {
@@ -294,7 +294,16 @@ const CentralEmailApp = {
     const atual = id ? this.achar(id) : null;
     this.fecharModal();
     const tags = this.tags().map((t) => `<option value="${t.id}"${atual && Number(atual.tag) === t.id ? " selected" : ""}>${this.esc(t.label)}</option>`).join("");
-    const botoes = this.VARIAVEIS.map((v) => `<button type="button" class="cem-var" onclick="CentralEmailApp.inserir('${v.token}')">${this.esc(v.label)}</button>`).join("");
+    const grupos = [];
+    this.VARIAVEIS.forEach((v) => {
+      let g = grupos.find((x) => x.nome === v.grupo);
+      if (!g) {
+        g = { nome: v.grupo, itens: [] };
+        grupos.push(g);
+      }
+      g.itens.push(v);
+    });
+    const botoes = grupos.map((g) => `<section class="cem-var-grupo"><h4>${this.esc(g.nome)}</h4>${g.itens.map((v) => `<button type="button" class="cem-var" onclick="CentralEmailApp.inserir('${v.token}')">${this.esc(v.label)}</button>`).join("")}</section>`).join("");
     const pop = document.createElement("div");
     pop.id = "cem-modal";
     pop.className = "cem-modal";
@@ -304,28 +313,36 @@ const CentralEmailApp = {
         <button type="button" class="btn btn-fechar" onclick="CentralEmailApp.fecharModal()">Fechar</button>
       </div>
       <div class="cem-body">
-        <div class="cem-grade">
-          <label>Nome<input id="cem-nome" class="cem-campo" value="${this.esc(atual ? atual.nome : "")}"></label>
-          <label>Assunto<input id="cem-assunto" class="cem-campo" value="${this.esc(atual ? atual.assunto : "")}"></label>
-          <label>Tag<select id="cem-tag" class="cem-campo">${tags}</select></label>
-          <label>Dias depois de vencido<input id="cem-dias" class="cem-campo" type="number" min="0" step="1" value="${atual ? atual.diasVencido : 5}"></label>
+        <div class="cem-editor">
+          <div class="cem-escrever">
+            <div class="cem-grade">
+              <label>Nome<input id="cem-nome" class="cem-campo" value="${this.esc(atual ? atual.nome : "")}"></label>
+              <label>Tag<select id="cem-tag" class="cem-campo">${tags}</select></label>
+              <label class="cem-span">Título do e-mail<input id="cem-assunto" class="cem-campo" value="${this.esc(atual ? atual.assunto : "")}"></label>
+              <label>Dias depois de vencido<input id="cem-dias" class="cem-campo" type="number" min="0" step="1" value="${atual ? atual.diasVencido : 5}"></label>
+            </div>
+            <label class="moura-switch cem-liga">
+              <input type="checkbox" id="cem-ativo" ${!atual || atual.ativo ? "checked" : ""}>
+              <span class="moura-switch-track" aria-hidden="true"></span>
+              <span class="moura-switch-text">Régua ligada</span>
+            </label>
+            <label class="cem-bloco-campo">Texto<textarea id="cem-corpo" class="cem-campo">${this.esc(atual ? atual.corpo : "")}</textarea></label>
+            <p class="cem-legenda">Prévia com um cliente de exemplo. Na fila do dia, nome, unidade, empreendimento, cidade e vencimento saem do contrato.</p>
+            <pre id="cem-previa" class="cem-previa"></pre>
+          </div>
+          <aside class="cem-vars-lado">
+            <h4>Variáveis</h4>
+            ${botoes}
+            <section class="cem-var-grupo">
+              <h4>Data de retorno</h4>
+              <label class="cem-retorno">Dias depois do envio
+                <input id="cem-retorno" type="number" min="0" step="1" value="5">
+              </label>
+              <button type="button" class="cem-var" onclick="CentralEmailApp.inserirRetorno()">Inserir data de retorno</button>
+            </section>
+            <button type="button" class="cem-var cem-modelo" onclick="CentralEmailApp.usarModelo()">Modelo de acordo judicial</button>
+          </aside>
         </div>
-        <label class="moura-switch cem-liga">
-          <input type="checkbox" id="cem-ativo" ${!atual || atual.ativo ? "checked" : ""}>
-          <span class="moura-switch-track" aria-hidden="true"></span>
-          <span class="moura-switch-text">Régua ligada</span>
-        </label>
-        <div class="cem-vars">
-          ${botoes}
-          <label class="cem-retorno">Data de retorno
-            <input id="cem-retorno" type="number" min="0" step="1" value="5">
-          </label>
-          <button type="button" class="cem-var" onclick="CentralEmailApp.inserirRetorno()">Inserir data de retorno</button>
-          <button type="button" class="cem-var" onclick="CentralEmailApp.usarModelo()">Modelo de acordo judicial</button>
-        </div>
-        <label class="cem-bloco-campo">Texto<textarea id="cem-corpo" class="cem-campo">${this.esc(atual ? atual.corpo : "")}</textarea></label>
-        <p class="cem-legenda">Prévia com um cliente de exemplo. Na fila do dia, nome, unidade, empreendimento, cidade e vencimento saem do contrato.</p>
-        <pre id="cem-previa" class="cem-previa"></pre>
       </div>
       <div class="cem-foot"><button type="button" class="btn btn-primary" onclick="CentralEmailApp.salvar('${this.esc(atual ? atual.id : "")}')">Salvar</button></div>
     </div>`;
@@ -336,7 +353,6 @@ const CentralEmailApp = {
       const el = document.getElementById(id);
       if (el) el.addEventListener("input", () => this.atualizarPreview());
     });
-    pop.addEventListener("click", (e) => { if (e.target === pop) this.fecharModal(); });
     this.atualizarPreview();
   },
 
@@ -386,7 +402,7 @@ const CentralEmailApp = {
     if (!previa) return;
     const titulo = this.aplicar(assunto && assunto.value, this.EXEMPLO);
     const texto = this.aplicar(corpo && corpo.value, this.EXEMPLO);
-    previa.textContent = (titulo ? titulo + "\n\n" : "") + texto;
+    previa.textContent = (titulo ? "Título: " + titulo + "\n\n" : "") + texto;
   },
 
   async salvar(id) {
@@ -397,8 +413,8 @@ const CentralEmailApp = {
     const tag = Number((document.getElementById("cem-tag") || {}).value);
     const dias = Math.round(Number((document.getElementById("cem-dias") || {}).value));
     const ativo = !!((document.getElementById("cem-ativo") || {}).checked);
-    if (!nome || !corpo.trim() || !Number.isFinite(tag) || !Number.isFinite(dias) || dias < 0) {
-      this.aviso("Informe o nome, o texto, a tag e os dias depois de vencido.");
+    if (!nome || !assunto || !corpo.trim() || !Number.isFinite(tag) || !Number.isFinite(dias) || dias < 0) {
+      this.aviso("Informe o nome, o título do e-mail, o texto, a tag e os dias depois de vencido.");
       return;
     }
     const item = { id: id || ("cem_" + Date.now().toString(36)), nome, assunto, corpo, tag, diasVencido: dias, ativo };
@@ -449,7 +465,6 @@ const CentralEmailApp = {
     document.body.appendChild(pop);
     const pre = document.getElementById("cem-leitura");
     if (pre) pre.textContent = texto;
-    pop.addEventListener("click", (e) => { if (e.target === pop) this.fecharModal(); });
   },
 
   verTemplate(id) {

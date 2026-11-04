@@ -3870,6 +3870,7 @@ function switchTab(tabId, titleOverride, showLoader = false) {
     "auditoria-login": "Auditoria do Login Sienge",
     "consumo-api": "Consumo de API",
     "usuarios-online": "Usuários online",
+    "alertas-popup": "Alertas automáticos",
     acessos: "Acessos"
   }
   document.dispatchEvent(new CustomEvent('tabChanged', { detail: tabId }));
@@ -3954,6 +3955,7 @@ function switchTab(tabId, titleOverride, showLoader = false) {
     "fiscal-rastrear-pedido": "search",
     "consumo-api": "activity",
     "usuarios-online": "users",
+    "alertas-popup": "bell",
     acessos: "key-round"
   };
 
@@ -4200,6 +4202,8 @@ function switchTab(tabId, titleOverride, showLoader = false) {
     if (window.ConsumoApiApp && typeof ConsumoApiApp.init === "function") ConsumoApiApp.init();
   } else if (tabId === "usuarios-online") {
     if (window.UsuariosOnline && typeof UsuariosOnline.init === "function") UsuariosOnline.init();
+  } else if (tabId === "alertas-popup") {
+    if (window.AlertasPopupApp && typeof AlertasPopupApp.abrir === "function") AlertasPopupApp.abrir();
   } else if (tabId === "auditoria-login") {
     if (window.AuditoriaLoginApp && typeof AuditoriaLoginApp.init === "function") AuditoriaLoginApp.init();
   } else if (tabId === "fiscal-inserir-nota") {

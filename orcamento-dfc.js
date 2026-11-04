@@ -1,6 +1,8 @@
 // DFC do orçamento 2027. A visão de receitas (OrcamentoApp) não passa por aqui.
 const OrcamentoDfcApp = {
   LS: "crm_orcamento_dfc_2027",
+  LS_V1: "crm_orcamento_dfc_2027_v1",
+  LS_V2: "crm_orcamento_dfc_2027_v2",
   LS_SALDO: "orc_dfc_balancete_v1",
   MESES: ["JAN", "FEV", "MAR", "ABR", "MAI", "JUN", "JUL", "AGO", "SET", "OUT", "NOV", "DEZ"],
   selectedCompanyIds: [],
@@ -20,6 +22,9 @@ const OrcamentoDfcApp = {
   expanded2: new Set(),
   _expand2Inited: false,
   visao: "1",
+  versao: "1",
+  _v1: null,
+  _v2: null,
   _custom: null,
   _pronto: false,
   busy: false,
@@ -83,24 +88,69 @@ const OrcamentoDfcApp = {
       .toUpperCase();
   },
 
+  lerPack(chave) {
+    try {
+      const raw = localStorage.getItem(chave);
+      if (!raw) return null;
+      const pack = JSON.parse(raw);
+      if (!pack || !Array.isArray(pack.lines) || !pack.lines.length) return null;
+      return pack;
+    } catch (e) {
+      return null;
+    }
+  },
+
+  gravarChave(chave, pack) {
+    const native = window._nativeLocalStorageSetItem || localStorage.setItem.bind(localStorage);
+    try { native.call(localStorage, chave, JSON.stringify(pack)); } catch (e) {}
+  },
+
+  copiarPack(pack, extra) {
+    if (!pack || !Array.isArray(pack.lines) || !pack.lines.length) return null;
+    return Object.assign({
+      fileName: pack.fileName || "",
+      savedAt: Number(pack.savedAt) || 0,
+      year: 2027,
+      lines: pack.lines
+    }, extra || {});
+  },
+
+  maisNovo(a, b) {
+    const ok = (p) => !!(p && Array.isArray(p.lines) && p.lines.length);
+    if (!ok(a)) return ok(b) ? b : null;
+    if (!ok(b)) return a;
+    return Number(a.savedAt) >= Number(b.savedAt) ? a : b;
+  },
+
+  /* V2 na tela: a variação de 2027 compara com a V1. V1 sozinha continua contra 2026. */
+  comparando() {
+    return this.versao === "2"
+      && this._v1 && Array.isArray(this._v1.lines) && this._v1.lines.length
+      && this._v2 && Array.isArray(this._v2.lines) && this._v2.lines.length;
+  },
+
   garantir() {
     if (this._pronto) return;
     this._pronto = true;
-    const emb = window.ORCAMENTO_DFC_2027;
-    const embAt = Number(emb && emb.savedAt) || 0;
-    try {
-      const raw = localStorage.getItem(this.LS);
-      if (!raw) return;
-      const pack = JSON.parse(raw);
-      if (!pack || !Array.isArray(pack.lines) || !pack.lines.length) return;
-      if (Number(pack.savedAt) < embAt) return;
-      this._custom = pack;
-    } catch (e) {}
+    const gravada = this.lerPack(this.LS_V1);
+    if (gravada) {
+      gravada.congelado = true;
+      gravada.versao = "1";
+      this._v1 = gravada;
+    }
+    this._v2 = this.lerPack(this.LS_V2);
+    if (this._v2) this._v2.versao = "2";
+    if (!this._v1) {
+      const emb = window.ORCAMENTO_DFC_2027;
+      this._v1 = this.maisNovo(this.lerPack(this.LS), emb && emb.lines ? emb : null);
+    }
+    if (this._v2 && !this._versaoEscolhida) this.versao = "2";
   },
 
   origem() {
     this.garantir();
-    if (this._custom && Array.isArray(this._custom.lines) && this._custom.lines.length) return this._custom;
+    if (this.versao === "2" && this._v2 && Array.isArray(this._v2.lines) && this._v2.lines.length) return this._v2;
+    if (this._v1 && Array.isArray(this._v1.lines) && this._v1.lines.length) return this._v1;
     return window.ORCAMENTO_DFC_2027 || { fileName: "", lines: [] };
   },
 
@@ -130,15 +180,19 @@ const OrcamentoDfcApp = {
     return [...map.entries()].map(([id, name]) => ({ id, name }));
   },
 
-  linhasFiltradas() {
+  linhasDoPacote(pack) {
     const emp = new Set(this.selectedCompanyIds.map(String));
     const cc = new Set(this.selectedCcIds.map(String));
-    return this.lines().filter((l) => {
+    return ((pack && pack.lines) || []).filter((l) => {
       if (emp.size && !emp.has(String(l.e))) return false;
       if (cc.size && !cc.has(String(l.cc))) return false;
       if (!this.planOn(l.conta)) return false;
       return true;
     });
+  },
+
+  linhasFiltradas() {
+    return this.linhasDoPacote(this.origem());
   },
 
   codigoPlano(conta) {
@@ -1237,6 +1291,51 @@ const OrcamentoDfcApp = {
     });
   },
 
+  acumularOrcado(byId, fora, lines, campo) {
+    const fluxo = typeof FluxoCaixaApp !== "undefined" ? FluxoCaixaApp : null;
+    const base = this.base2026();
+    (lines || []).forEach((l) => {
+      const gid = this.grupoDaConta(l.conta, l.cn);
+      if (!this.grupoOn(gid)) return;
+      const g = gid ? byId[gid] : null;
+      if (!g || g.type !== "resultado") {
+        if (!fora || campo !== "months") return;
+        const key = String(l.conta || "") + "|" + String(l.cn || "");
+        const cur = fora.get(key) || { conta: l.conta, cn: l.cn, total: 0 };
+        (l.m || []).forEach((v) => { cur.total += Number(v) || 0; });
+        fora.set(key, cur);
+        return;
+      }
+      if (!g[campo]) g[campo] = this.z12();
+      let acc = g.accs.get(l.conta);
+      if (!acc) {
+        const achado = this.acharBase(base.contas, gid, l.conta);
+        acc = { conta: l.conta, cn: l.cn, months: this.z12(), base: achado ? achado.slice() : this.z12(), cmp: this.z12(), ccs: new Map() };
+        g.accs.set(l.conta, acc);
+      }
+      if (!acc[campo]) acc[campo] = this.z12();
+      const ccId = String(l.cc || "").trim() || "—";
+      let cc = acc.ccs.get(ccId);
+      if (!cc) {
+        const achadoCc = this.acharBase(base.ccs, gid, l.conta, ccId);
+        cc = { id: ccId, name: String(l.en || "").trim(), months: this.z12(), base: achadoCc ? achadoCc.slice() : this.z12(), cmp: this.z12() };
+        acc.ccs.set(ccId, cc);
+      } else if (!cc.name && l.en) {
+        cc.name = String(l.en).trim();
+      }
+      if (!cc[campo]) cc[campo] = this.z12();
+      (l.m || []).forEach((v, i) => {
+        if (i > 11) return;
+        const s = fluxo && typeof fluxo.signedAmount === "function"
+          ? fluxo.signedAmount(g, l.conta, l.cn, v)
+          : (Number(v) || 0);
+        acc[campo][i] += s;
+        cc[campo][i] += s;
+        g[campo][i] += s;
+      });
+    });
+  },
+
   montar(opts) {
     const aberto = !!(opts && opts.aberto);
     const plano = typeof PlanoFinanceiroApp !== "undefined" ? PlanoFinanceiroApp : null;
@@ -1246,47 +1345,14 @@ const OrcamentoDfcApp = {
       ...g,
       months: Array(12).fill(0),
       base: Array(12).fill(0),
+      cmp: Array(12).fill(0),
       accs: new Map()
     }));
     const byId = {};
     tpl.forEach((g) => { byId[g.id] = g; });
     const fora = new Map();
-    this.linhasFiltradas().forEach((l) => {
-      const gid = this.grupoDaConta(l.conta, l.cn);
-      if (!this.grupoOn(gid)) return;
-      const g = gid ? byId[gid] : null;
-      if (!g || g.type !== "resultado") {
-        const key = String(l.conta || "") + "|" + String(l.cn || "");
-        const cur = fora.get(key) || { conta: l.conta, cn: l.cn, total: 0 };
-        (l.m || []).forEach((v) => { cur.total += Number(v) || 0; });
-        fora.set(key, cur);
-        return;
-      }
-      let acc = g.accs.get(l.conta);
-      if (!acc) {
-        const achado = this.acharBase(base.contas, gid, l.conta);
-        acc = { conta: l.conta, cn: l.cn, months: Array(12).fill(0), base: achado ? achado.slice() : Array(12).fill(0), ccs: new Map() };
-        g.accs.set(l.conta, acc);
-      }
-      const ccId = String(l.cc || "").trim() || "—";
-      let cc = acc.ccs.get(ccId);
-      if (!cc) {
-        const achadoCc = this.acharBase(base.ccs, gid, l.conta, ccId);
-        cc = { id: ccId, name: String(l.en || "").trim(), months: Array(12).fill(0), base: achadoCc ? achadoCc.slice() : Array(12).fill(0) };
-        acc.ccs.set(ccId, cc);
-      } else if (!cc.name && l.en) {
-        cc.name = String(l.en).trim();
-      }
-      (l.m || []).forEach((v, i) => {
-        if (i > 11) return;
-        const s = fluxo && typeof fluxo.signedAmount === "function"
-          ? fluxo.signedAmount(g, l.conta, l.cn, v)
-          : (Number(v) || 0);
-        acc.months[i] += s;
-        cc.months[i] += s;
-        g.months[i] += s;
-      });
-    });
+    this.acumularOrcado(byId, fora, this.linhasFiltradas(), "months");
+    if (this.comparando()) this.acumularOrcado(byId, null, this.linhasDoPacote(this._v1), "cmp");
 
     const nomesCc = {};
     const nomesConta = {};
@@ -1361,12 +1427,15 @@ const OrcamentoDfcApp = {
       if (!filhos.length) return;
       const meses = Array(12).fill(0);
       const realizado = Array(12).fill(0);
+      const anterior = Array(12).fill(0);
       filhos.forEach((ch) => {
         ch.months.forEach((v, i) => { meses[i] += Number(v) || 0; });
         ch.base.forEach((v, i) => { realizado[i] += Number(v) || 0; });
+        (ch.cmp || []).forEach((v, i) => { anterior[i] += Number(v) || 0; });
       });
       g.months = meses;
       g.base = realizado;
+      g.cmp = anterior;
     });
     const sum = (ids, campo) => {
       const months = Array(12).fill(0);
@@ -1381,6 +1450,7 @@ const OrcamentoDfcApp = {
       if (!byId[id]) return;
       byId[id].months = sum(parts, "months");
       byId[id].base = sum(parts, "base");
+      byId[id].cmp = sum(parts, "cmp");
     };
     apply("g_03", ["g_04", "g_05"]);
     apply("g_06", ["g_01", "g_02", "g_03"]);
@@ -1397,7 +1467,7 @@ const OrcamentoDfcApp = {
     const walk = (node, level) => {
       const children = tpl.filter((g) => g.parentId === node.id);
       const accs = [...node.accs.values()]
-        .filter((a) => a.months.some((v) => Math.abs(v) >= 0.005) || (a.base || []).some((v) => Math.abs(Number(v) || 0) >= 0.005))
+        .filter((a) => a.months.some((v) => Math.abs(v) >= 0.005) || (a.base || []).some((v) => Math.abs(Number(v) || 0) >= 0.005) || (a.cmp || []).some((v) => Math.abs(Number(v) || 0) >= 0.005))
         .sort((a, b) => String(a.conta).localeCompare(String(b.conta), "pt-BR", { numeric: true }));
       const hasKids = children.length > 0 || accs.length > 0;
       const total = node.months.reduce((a, b) => a + b, 0);
@@ -1411,8 +1481,10 @@ const OrcamentoDfcApp = {
         isAccount: false,
         months: node.months,
         base: node.base,
+        cmp: node.cmp || Array(12).fill(0),
         total,
         baseTotal,
+        cmpTotal: (node.cmp || []).reduce((a, b) => a + (Number(b) || 0), 0),
         drillGid: node.id,
         drillConta: "",
         drillCc: ""
@@ -1422,7 +1494,7 @@ const OrcamentoDfcApp = {
       accs.forEach((a) => {
         const accId = "acc:" + node.id + ":" + a.conta;
         const ccs = [...(a.ccs ? a.ccs.values() : [])]
-          .filter((c) => c.months.some((v) => Math.abs(v) >= 0.005) || (c.base || []).some((v) => Math.abs(Number(v) || 0) >= 0.005))
+          .filter((c) => c.months.some((v) => Math.abs(v) >= 0.005) || (c.base || []).some((v) => Math.abs(Number(v) || 0) >= 0.005) || (c.cmp || []).some((v) => Math.abs(Number(v) || 0) >= 0.005))
           .sort((x, y) => {
             const peso = (c) => (c.base || []).reduce((s, v) => s + Math.abs(Number(v) || 0), 0);
             const diff = peso(y) - peso(x);
@@ -1439,8 +1511,10 @@ const OrcamentoDfcApp = {
           isCc: false,
           months: a.months,
           base: a.base || Array(12).fill(0),
+          cmp: a.cmp || Array(12).fill(0),
           total: a.months.reduce((x, y) => x + y, 0),
           baseTotal: (a.base || []).reduce((x, y) => x + y, 0),
+          cmpTotal: (a.cmp || []).reduce((x, y) => x + (Number(y) || 0), 0),
           drillGid: node.id,
           drillConta: a.conta,
           drillCc: ""
@@ -1458,8 +1532,10 @@ const OrcamentoDfcApp = {
             isCc: true,
             months: c.months,
             base: c.base || Array(12).fill(0),
+            cmp: c.cmp || Array(12).fill(0),
             total: c.months.reduce((x, y) => x + y, 0),
             baseTotal: (c.base || []).reduce((x, y) => x + y, 0),
+            cmpTotal: (c.cmp || []).reduce((x, y) => x + (Number(y) || 0), 0),
             drillGid: node.id,
             drillConta: a.conta,
             drillCc: c.id
@@ -1505,7 +1581,8 @@ const OrcamentoDfcApp = {
     const tpl = (plano && typeof plano.dfcTemplateGroups === "function" ? plano.dfcTemplateGroups() : []).map((g) => ({
       ...g,
       months: Array(12).fill(0),
-      base: Array(12).fill(0)
+      base: Array(12).fill(0),
+      cmp: Array(12).fill(0)
     }));
     const byId = {};
     tpl.forEach((g) => { byId[g.id] = g; });
@@ -1525,12 +1602,12 @@ const OrcamentoDfcApp = {
       const k = gid + "\n" + emp + "\n" + cc + "\n" + conta;
       let f = folhas.get(k);
       if (!f) {
-        f = { gid: gid, emp: emp, cc: cc, conta: conta, months: z(), base: z() };
+        f = { gid: gid, emp: emp, cc: cc, conta: conta, months: z(), base: z(), cmp: z() };
         folhas.set(k, f);
       }
       return f;
     };
-    const vivo = (m, b) => (m || []).some((v) => Math.abs(Number(v) || 0) >= 0.005) || (b || []).some((v) => Math.abs(Number(v) || 0) >= 0.005);
+    const vivo = (m, b, c) => (m || []).some((v) => Math.abs(Number(v) || 0) >= 0.005) || (b || []).some((v) => Math.abs(Number(v) || 0) >= 0.005) || (c || []).some((v) => Math.abs(Number(v) || 0) >= 0.005);
     this.linhasFiltradas().forEach((l) => {
       const gid = this.grupoDaConta(l.conta, l.cn);
       if (!this.grupoOn(gid)) return;
@@ -1558,6 +1635,23 @@ const OrcamentoDfcApp = {
         g.months[i] += s;
       });
     });
+    if (this.comparando()) {
+      this.linhasDoPacote(this._v1).forEach((l) => {
+        const gid = this.grupoDaConta(l.conta, l.cn);
+        if (!this.grupoOn(gid)) return;
+        const g = gid ? byId[gid] : null;
+        if (!g || g.type !== "resultado") return;
+        const f = folha(gid, String(l.e || ""), ccIdDe(l.cc), String(l.conta || ""));
+        (l.m || []).forEach((v, i) => {
+          if (i > 11) return;
+          const s = fluxo && typeof fluxo.signedAmount === "function"
+            ? fluxo.signedAmount(g, l.conta, l.cn, v)
+            : (Number(v) || 0);
+          f.cmp[i] += s;
+          g.cmp[i] += s;
+        });
+      });
+    }
     const empFiltro = new Set(this.selectedCompanyIds.map(String));
     (this._lancamentos2026 || []).forEach((c) => {
       const emp = String(c.companyId || "");
@@ -1630,6 +1724,7 @@ const OrcamentoDfcApp = {
       tpl.filter((c) => c.parentId === g.id && c.type !== "formula").forEach((ch) => {
         ch.months.forEach((v, i) => { g.months[i] += v; });
         ch.base.forEach((v, i) => { g.base[i] += v; });
+        (ch.cmp || []).forEach((v, i) => { g.cmp[i] += v; });
       });
     });
     const sum = (ids, campo) => {
@@ -1645,6 +1740,7 @@ const OrcamentoDfcApp = {
       if (!byId[id]) return;
       byId[id].months = sum(parts, "months");
       byId[id].base = sum(parts, "base");
+      byId[id].cmp = sum(parts, "cmp");
     };
     apply("g_03", ["g_04", "g_05"]);
     apply("g_06", ["g_01", "g_02", "g_03"]);
@@ -1675,11 +1771,14 @@ const OrcamentoDfcApp = {
     const linhaDe = (parcial) => {
       const months = parcial.months;
       const baseMeses = parcial.base;
+      const cmpMeses = parcial.cmp || z();
       rows.push(Object.assign({
         months: months,
         base: baseMeses,
+        cmp: cmpMeses,
         total: tot(months),
         baseTotal: tot(baseMeses),
+        cmpTotal: tot(cmpMeses),
         isAccount: false,
         isCc: false
       }, parcial));
@@ -1689,7 +1788,7 @@ const OrcamentoDfcApp = {
       const alvos = raiz.type === "resultado"
         ? [raiz]
         : tpl.filter((g) => g.parentId === raiz.id && g.type === "resultado");
-      const doGrupo = formula ? [] : lista.filter((f) => alvos.some((a) => a.id === f.gid) && vivo(f.months, f.base));
+      const doGrupo = formula ? [] : lista.filter((f) => alvos.some((a) => a.id === f.gid) && vivo(f.months, f.base, f.cmp));
       linhaDe({
         id: raiz.id,
         name: raiz.name,
@@ -1699,6 +1798,7 @@ const OrcamentoDfcApp = {
         hasKids: doGrupo.length > 0,
         months: raiz.months,
         base: raiz.base,
+        cmp: raiz.cmp,
         drillGid: raiz.id,
         drillConta: "",
         drillCc: "",
@@ -1724,6 +1824,7 @@ const OrcamentoDfcApp = {
             isAccount: true,
             months: somaDe(daConta, "months"),
             base: somaDe(daConta, "base"),
+            cmp: somaDe(daConta, "cmp"),
             drillGid: gid,
             drillConta: conta,
             drillCc: cc,
@@ -1745,6 +1846,7 @@ const OrcamentoDfcApp = {
             hasKids: true,
             months: somaDe(daEmp, "months"),
             base: somaDe(daEmp, "base"),
+            cmp: somaDe(daEmp, "cmp"),
             drillGid: gid,
             drillConta: "",
             drillCc: "",
@@ -1765,6 +1867,7 @@ const OrcamentoDfcApp = {
               isCc: true,
               months: somaDe(doCc, "months"),
               base: somaDe(doCc, "base"),
+              cmp: somaDe(doCc, "cmp"),
               drillGid: gid,
               drillConta: "",
               drillCc: cc,
@@ -1789,6 +1892,7 @@ const OrcamentoDfcApp = {
             hasKids: true,
             months: somaDe(daLinha, "months"),
             base: somaDe(daLinha, "base"),
+            cmp: somaDe(daLinha, "cmp"),
             drillGid: linha.id,
             drillConta: "",
             drillCc: "",
@@ -1819,6 +1923,7 @@ const OrcamentoDfcApp = {
             hasKids: true,
             months: somaDe(daLinha, "months"),
             base: somaDe(daLinha, "base"),
+            cmp: somaDe(daLinha, "cmp"),
             drillGid: linha.id,
             drillConta: "",
             drillCc: cc,
@@ -1841,7 +1946,7 @@ const OrcamentoDfcApp = {
     root.innerHTML = `
       <div class="orc-dfc-page">
         ${typeof OrcamentoApp !== "undefined" ? OrcamentoApp.abasHtml() : ""}
-        <p class="orc-dfc-lead">Janeiro a dezembro de 2026, o total, e depois janeiro a dezembro de 2027. A variação ao lado de cada mês de 2027 compara com o mesmo mês de 2026. O saldo final de 2026 é o saldo inicial de janeiro de 2027, e cada mês seguinte parte do saldo final do anterior. ${this.textoCorte()} O realizado vem do caixa e banco.</p>
+        <p class="orc-dfc-lead" id="orc-dfc-lead">${this.textoLead()}</p>
         <div class="ml-tabs orc-dfc-visao" role="tablist">
           <button type="button" role="tab" class="ml-tab${this.visao === "2" ? "" : " is-active"}" data-dfc-visao="1" aria-selected="${this.visao === "2" ? "false" : "true"}"><i data-lucide="table-2"></i> Visão 1</button>
           <button type="button" role="tab" class="ml-tab${this.visao === "2" ? " is-active" : ""}" data-dfc-visao="2" aria-selected="${this.visao === "2" ? "true" : "false"}"><i data-lucide="building-2"></i> Visão 2</button>
@@ -1866,7 +1971,8 @@ const OrcamentoDfcApp = {
           <button type="button" class="btn btn-sm btn-excel" id="orc-dfc-excel" title="Exportar a tabela atual para Excel">
             <i data-lucide="download" style="width:14px;height:14px;"></i> Excel
           </button>
-          <button type="button" class="orc-dfc-up" id="orc-dfc-up"><i data-lucide="upload"></i> Subir Excel 2027</button>
+          <div id="orc-dfc-versoes"></div>
+          <button type="button" class="orc-dfc-up" id="orc-dfc-up"><i data-lucide="upload"></i> Subir V2</button>
           <input id="orc-dfc-file" type="file" accept=".xlsx,.xlsm,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" hidden>
           <span class="orc-dfc-meta" id="orc-dfc-meta"></span>
         </div>
@@ -1875,6 +1981,7 @@ const OrcamentoDfcApp = {
           <aside id="orc-dfc-fora"></aside>
         </div>
       </div>`;
+    this.paintVersao();
     this.paintMeta(src);
     this.paintEmp();
     this.paintCc();
@@ -2449,11 +2556,18 @@ const OrcamentoDfcApp = {
     return (this.varRs ? 1 : 0) + (this.varPct ? 1 : 0);
   },
 
-  htmlVars(orc, real) {
+  refLinha(r) {
+    if (this.comparando()) return { meses: (r && r.cmp) || [], total: Number(r && r.cmpTotal) || 0 };
+    return { meses: (r && r.base) || [], total: Number(r && r.baseTotal) || 0 };
+  },
+
+  htmlVars(orc, real, modo) {
     const o = Number(orc) || 0;
     const b = Number(real) || 0;
     const d = o - b;
-    const titulo = "2026 " + this.money(b) + " · 2027 " + this.money(o) + " · " + this.money(d) + " · " + this.pct(o, b);
+    const titulo = modo === "v1"
+      ? ("V1 " + this.money(b) + " · V2 " + this.money(o) + " · " + this.money(d) + " · " + this.pct(o, b))
+      : ("2026 " + this.money(b) + " · 2027 " + this.money(o) + " · " + this.money(d) + " · " + this.pct(o, b));
     let html = "";
     if (this.varRs) {
       const neg = d < -0.005 ? " orc-dfc-neg" : "";
@@ -2592,17 +2706,64 @@ const OrcamentoDfcApp = {
     });
   },
 
+  textoLead() {
+    const comum = "O saldo final de 2026 é o saldo inicial de janeiro de 2027, e cada mês seguinte parte do saldo final do anterior. " + this.textoCorte() + " O realizado vem do caixa e banco.";
+    if (this.comparando()) return "A V1 é a base de 2027 que já estava carregada. A V2 é o arquivo novo. A variação de cada mês de 2027 compara a V2 com a V1. " + comum;
+    if (this._v2 && this.versao === "1") return "Você está na V1, a base anterior de 2027. A variação de cada mês de 2027 compara com o mesmo mês de 2026. " + comum;
+    return "Janeiro a dezembro de 2026, o total, e depois janeiro a dezembro de 2027. A variação ao lado de cada mês de 2027 compara com o mesmo mês de 2026. " + comum;
+  },
+
+  setVersao(id) {
+    if (id === "2" && !(this._v2 && Array.isArray(this._v2.lines) && this._v2.lines.length)) return;
+    this.versao = id === "2" ? "2" : "1";
+    this._versaoEscolhida = true;
+    this.selectedCompanyIds = [];
+    this.selectedCcIds = [];
+    this.selectedPlanIds = [];
+    this.selectedGrupoIds = [];
+    const lead = document.getElementById("orc-dfc-lead");
+    if (lead) lead.textContent = this.textoLead();
+    this.paintVersao();
+    this.paintMeta();
+    this.paintEmp();
+    this.paintCc();
+    this.paintPlan();
+    this.paintGrupo();
+    this.paintBody();
+  },
+
+  paintVersao() {
+    const box = document.getElementById("orc-dfc-versoes");
+    if (!box) return;
+    const tem2 = !!(this._v2 && Array.isArray(this._v2.lines) && this._v2.lines.length);
+    if (!tem2) {
+      box.innerHTML = "";
+      return;
+    }
+    const btn = (id, label) => {
+      const on = this.versao === id;
+      return `<button type="button" role="tab" class="ml-tab${on ? " is-active" : ""}" data-dfc-versao="${id}" aria-selected="${on ? "true" : "false"}">${label}</button>`;
+    };
+    box.innerHTML = `<div class="ml-tabs" role="tablist">${btn("1", "V1")}${btn("2", "V2")}</div>`;
+    box.querySelectorAll("[data-dfc-versao]").forEach((el) => {
+      el.addEventListener("click", () => this.setVersao(el.getAttribute("data-dfc-versao")));
+    });
+  },
+
   paintMeta(src) {
     const el = document.getElementById("orc-dfc-meta");
     if (!el) return;
     const pack = src || this.origem();
     const n = (pack.lines || []).length;
     const nome = pack.fileName || "Base 2027";
-    const extra = this._custom ? " · arquivo enviado" : "";
+    const marca = this.versao === "2" && this._v2 ? "V2" : "V1";
     const estado = this.erro
       ? " · " + this.erro
       : (this._nuvemOk ? " · salvo no Firebase" : (this._nuvemMsg ? " · " + this._nuvemMsg : ""));
-    el.textContent = n ? (nome + " · " + n.toLocaleString("pt-BR") + " lançamentos" + extra + estado) : ("Nenhum orçamento carregado." + estado);
+    const outra = this._v2 && this._v1
+      ? (" · " + (this.versao === "2" ? "V1 " + (this._v1.fileName || "base") : "V2 " + (this._v2.fileName || "arquivo")))
+      : "";
+    el.textContent = n ? (marca + " · " + nome + " · " + n.toLocaleString("pt-BR") + " lançamentos" + outra + estado) : ("Nenhum orçamento carregado." + estado);
   },
 
   paintEmp() {
@@ -2940,7 +3101,8 @@ const OrcamentoDfcApp = {
     const extras = (this.varRs ? `<th class="orc-dfc-vcol">Var R$</th>` : "") + (this.varPct ? `<th class="orc-dfc-vcol">Var %</th>` : "");
     const h26 = this.MESES.map((m, i) => `<th${i === 0 ? " class=\"orc-dfc-sep\"" : ""} title="${i >= corte ? "Previsão de 2026" : "Realizado de 2026"}">${m}</th>`).join("") + `<th class="orc-dfc-sep">Total</th>`;
     const h27 = this.MESES.map((m, i) => `<th${i === 0 ? " class=\"orc-dfc-sep\"" : ""}>${m}</th>${extras}`).join("") + `<th class="orc-dfc-sep">Total</th>${extras}`;
-    const h1 = `<th colspan="13" class="orc-dfc-mes">2026</th><th colspan="${13 * (1 + this.colsVar())}" class="orc-dfc-mes is-alt">2027</th>`;
+    const rotulo27 = this.versao === "2" && this._v2 ? "2027 · V2" : (this._v2 ? "2027 · V1" : "2027");
+    const h1 = `<th colspan="13" class="orc-dfc-mes">2026</th><th colspan="${13 * (1 + this.colsVar())}" class="orc-dfc-mes is-alt">${rotulo27}</th>`;
     const h2 = h26 + h27;
     const trs = rows.map((r) => {
       const cls = [
@@ -2969,14 +3131,16 @@ const OrcamentoDfcApp = {
         return `<td class="${(sep + neg + abre).trim()}"${marca} title="${this.esc(titulo + (chave ? " · Ver lançamentos" : ""))}">${this.money(real)}</td>`;
       }).join("");
       const baseTotal = Number(r.baseTotal) || 0;
+      const ref = this.refLinha(r);
+      const modoVar = this.comparando() ? "v1" : "";
       const chaveTot = corte > 0 ? (r.id + "||t") : "";
       const tot26 = `<td class="orc-dfc-sep${baseTotal < -0.005 ? " orc-dfc-neg" : ""}${chaveTot ? " orc-dfc-abre" : ""}"${chaveTot ? ` data-orc-2026="${this.esc(chaveTot)}"` : ""} title="Total de 2026">${this.money(baseTotal)}</td>`;
       const tot27 = (r.months || []).reduce((a, b) => a + (Number(b) || 0), 0);
       const c27 = (r.months || []).map((v, i) => {
         const n = Number(v) || 0;
         const sep = i === 0 ? " orc-dfc-sep" : "";
-        return `<td class="${sep.trim()}${n < -0.005 ? " orc-dfc-neg" : ""}">${this.money(n)}</td>${this.htmlVars(n, base[i])}`;
-      }).join("") + `<td class="orc-dfc-sep${tot27 < -0.005 ? " orc-dfc-neg" : ""}" title="Total de 2027">${this.money(tot27)}</td>${this.htmlVars(tot27, baseTotal)}`;
+        return `<td class="${sep.trim()}${n < -0.005 ? " orc-dfc-neg" : ""}">${this.money(n)}</td>${this.htmlVars(n, ref.meses[i], modoVar)}`;
+      }).join("") + `<td class="orc-dfc-sep${tot27 < -0.005 ? " orc-dfc-neg" : ""}" title="Total de 2027">${this.money(tot27)}</td>${this.htmlVars(tot27, ref.total, modoVar)}`;
       const click = r.hasKids ? ` data-dfc-id="${this.esc(r.id)}"` : "";
       return `<tr class="${cls}"${click}>
         <td style="padding-left:${6 + r.level * 8}px">${ico}<span>${this.esc(r.name)}</span></td>
@@ -3057,7 +3221,7 @@ const OrcamentoDfcApp = {
     return false;
   },
 
-  async salvarOrcamentoNuvem(pack) {
+  async salvarOrcamentoNuvem(pack, idDoc) {
     if (!pack) return;
     const pronto = await this.firebasePronto();
     const fx = window.firebaseCollections;
@@ -3071,7 +3235,7 @@ const OrcamentoDfcApp = {
       return;
     }
     const texto = JSON.stringify(pack.lines || []);
-    const id = "2027";
+    const id = idDoc || (pack.versao === "2" ? "2027_v2" : "2027_v1");
     const LIM = 300000;
     const ids = [];
     try {
@@ -3110,12 +3274,12 @@ const OrcamentoDfcApp = {
     if (document.getElementById("orc-dfc-body")) this.paintBody();
   },
 
-  async lerOrcamentoNuvem(token) {
+  async lerDocOrcamento(id) {
     const fx = window.firebaseCollections;
     const db = window.firebaseDb;
-    if (!fx || !db || typeof fx.getDoc !== "function" || this._ignorarNuvem) return;
-    const snap = await fx.getDoc(fx.doc(db, "dfc_orcamento", "2027"));
-    if (token !== this._bToken || !this.docExiste(snap)) return;
+    if (!fx || !db || typeof fx.getDoc !== "function") return null;
+    const snap = await fx.getDoc(fx.doc(db, "dfc_orcamento", id));
+    if (!this.docExiste(snap)) return null;
     const x = snap.data() || {};
     let texto = x.payload || "";
     if (Array.isArray(x.partes) && x.partes.length) {
@@ -3123,20 +3287,43 @@ const OrcamentoDfcApp = {
         const p = await fx.getDoc(fx.doc(db, "dfc_orcamento", pid));
         return this.docExiste(p) ? String((p.data() || {}).texto || "") : null;
       }));
-      if (token !== this._bToken || blocos.some((b) => b == null)) return;
+      if (blocos.some((b) => b == null)) return null;
       texto = blocos.join("");
     }
     let lines = [];
-    try { lines = JSON.parse(texto || "[]"); } catch (e) { return; }
-    if (!Array.isArray(lines) || !lines.length) return;
-    const pack = { fileName: x.fileName || "Base 2027", savedAt: Number(x.savedAt) || 0, year: 2027, lines: lines };
-    const atual = this.origem();
+    try { lines = JSON.parse(texto || "[]"); } catch (e) { return null; }
+    if (!Array.isArray(lines) || !lines.length) return null;
+    return { fileName: x.fileName || "Base 2027", savedAt: Number(x.savedAt) || 0, year: 2027, lines: lines };
+  },
+
+  async lerOrcamentoNuvem(token) {
+    if (this._ignorarNuvem) return;
+    const v1doc = await this.lerDocOrcamento("2027_v1");
+    const v2doc = await this.lerDocOrcamento("2027_v2");
+    const legado = await this.lerDocOrcamento("2027");
     if (token !== this._bToken) return;
-    if (Number(pack.savedAt) <= Number(atual.savedAt || 0)) return;
-    this._custom = pack;
+    if (v1doc) {
+      this._v1 = this.copiarPack(v1doc, { congelado: true, versao: "1" });
+      this.gravarChave(this.LS_V1, this._v1);
+    } else if (!(this._v1 && this._v1.congelado)) {
+      const base = this.copiarPack(this.maisNovo(this._v1, legado), { congelado: true, versao: "1" });
+      if (base) {
+        this._v1 = base;
+        this.gravarChave(this.LS_V1, base);
+        this.salvarOrcamentoNuvem(base, "2027_v1");
+      }
+    }
+    if (token !== this._bToken) return;
+    if (v2doc) {
+      this._v2 = this.copiarPack(v2doc, { versao: "2" });
+      this.gravarChave(this.LS_V2, this._v2);
+      if (!this._versaoEscolhida) {
+        this.versao = "2";
+        this.varRs = true;
+      }
+    }
     this._nuvemOk = true;
     this._nuvemMsg = "";
-    this.gravarLocal(pack);
     if (token !== this._bToken) return;
     if (typeof OrcamentoApp !== "undefined" && (OrcamentoApp.aba === "painel" || OrcamentoApp.aba === "mensal") && window.OrcamentoDfcSlidesApp) {
       const root = document.getElementById("orcamento-root");
@@ -3144,8 +3331,11 @@ const OrcamentoDfcApp = {
       return;
     }
     if (!document.getElementById("orc-dfc-body")) return;
-    const base = document.getElementById("orc-dfc-base");
-    if (base) base.hidden = false;
+    const lead = document.getElementById("orc-dfc-lead");
+    if (lead) lead.textContent = this.textoLead();
+    const varRs = document.getElementById("orc-dfc-var-rs");
+    if (varRs && this.varRs) varRs.checked = true;
+    this.paintVersao();
     this.paintMeta();
     this.paintEmp();
     this.paintCc();
@@ -3162,16 +3352,22 @@ const OrcamentoDfcApp = {
     try {
       const lines = await this.parseExcel(buf);
       if (!lines.length) throw new Error("O Excel não tem lançamentos com valor. Use a aba Importação, com EMPRESA, CONTA e os meses.");
-      pack = { fileName: fileName, savedAt: Date.now(), year: 2027, lines: lines };
+      pack = { fileName: fileName, savedAt: Date.now(), year: 2027, versao: "2", lines: lines };
+      this._v2 = pack;
+      this.versao = "2";
+      this._versaoEscolhida = true;
       this._custom = pack;
       this._ignorarNuvem = false;
       this._nuvemOk = false;
-      this._nuvemMsg = "Salvando no Firebase…";
-      this.gravarLocal(pack);
+      this._nuvemMsg = "Salvando a V2 no Firebase…";
+      this.varRs = true;
+      this.gravarChave(this.LS_V2, pack);
     } catch (err) {
       this.erro = (err && err.message) ? err.message : "Não consegui ler esse Excel.";
     }
     this.busy = false;
+    const varRs = document.getElementById("orc-dfc-var-rs");
+    if (varRs && this.varRs) varRs.checked = true;
     const base = document.getElementById("orc-dfc-base");
     if (base) base.hidden = !this._custom;
     this.paintMeta();
@@ -3179,7 +3375,10 @@ const OrcamentoDfcApp = {
     this.paintCc();
     this.paintPlan();
     this.paintBody();
-    if (pack) this.salvarOrcamentoNuvem(pack);
+    this.paintVersao();
+    const lead = document.getElementById("orc-dfc-lead");
+    if (lead) lead.textContent = this.textoLead();
+    if (pack) this.salvarOrcamentoNuvem(pack, "2027_v2");
   },
 
   voltarBase() {
@@ -3429,7 +3628,7 @@ const OrcamentoDfcApp = {
       ? ("Visão 2 · receitas e impostos: empresa, centro de custo, linha e plano. Custos e despesas: linha, empresa, centro de custo e plano. " + this.textoCorte())
       : (opts.varias
       ? (opts.empresa.id + " - " + (opts.empresa.name || ""))
-      : ("Orçamento 2027 contra o DFC de 2026 · " + this.textoCorte()));
+      : (this.comparando() ? ("V2 contra a V1 · " + this.textoCorte()) : ("Orçamento 2027 contra o DFC de 2026 · " + this.textoCorte())));
     const title = ws.getCell("A1");
     title.value = {
       richText: [
@@ -3476,20 +3675,21 @@ const OrcamentoDfcApp = {
       const valores = [r.name];
       const kinds = ["text"];
       const bases = r.base || [];
+      const ref = this.refLinha(r);
       bases.forEach((real) => { valores.push(Number(real) || 0); kinds.push("num"); });
       while (valores.length < 13) { valores.push(0); kinds.push("num"); }
       valores.push(Number(r.baseTotal) || 0);
       kinds.push("num");
       (r.months || []).forEach((orc, i) => {
         const o = Number(orc) || 0;
-        const b = Number(bases[i]) || 0;
+        const b = this.comparando() ? (Number(ref.meses[i]) || 0) : (Number(bases[i]) || 0);
         valores.push(o);
         kinds.push("num");
         if (this.varRs) { valores.push(o - b); kinds.push("num"); }
         if (this.varPct) { valores.push(this.pctNum(o, b)); kinds.push("pct"); }
       });
       const tot27 = (r.months || []).reduce((a, b) => a + (Number(b) || 0), 0);
-      const baseAno = Number(r.baseTotal) || 0;
+      const baseAno = this.comparando() ? (Number(ref.total) || 0) : (Number(r.baseTotal) || 0);
       valores.push(tot27);
       kinds.push("num");
       if (this.varRs) { valores.push(tot27 - baseAno); kinds.push("num"); }

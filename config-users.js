@@ -550,7 +550,8 @@ const ConfigUsersApp = {
           { id: "auditoria", label: "Auditoria do Sistema", permBase: "sub_seg_geral_auditoria" },
           { id: "auditoria_login", label: "Auditoria do Login Sienge", permBase: "sub_seg_geral_auditoria_login" },
           { id: "consumo_api", label: "Consumo de API", permBase: "sub_seg_geral_consumo_api" },
-          { id: "usuarios_online", label: "Usuários online", permBase: "sub_seg_geral_usuarios_online" }
+          { id: "usuarios_online", label: "Usuários online", permBase: "sub_seg_geral_usuarios_online" },
+          { id: "alertas_popup", label: "Alertas automáticos", permBase: "sub_seg_geral_alertas_popup" }
         ] }
       ]
     },
