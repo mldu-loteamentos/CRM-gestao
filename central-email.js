@@ -27,8 +27,6 @@ const CentralEmailApp = {
     vencimento_proxima: "10/11"
   },
 
-  MODELO: "Olá, {{nome}}.\n\nVerificamos que o acordo judicial de reparcelamento ainda não está sendo cumprido integralmente. Seu contrato atualmente possui {{texto_abertas}}, e a {{ordinal_proxima}} parcela vencerá em {{vencimento_proxima}}, o que agrava a situação de inadimplência.\n\nÉ fundamental regularizar os pagamentos para manter as condições estabelecidas no acordo. Gostaríamos de solicitar, por gentileza, um posicionamento até o dia {{retorno:5}}. Por gentileza, nos informe uma previsão de pagamento.\n\nInformamos que a manutenção da inadimplência poderá resultar no prosseguimento do processo de cobrança pelos meios já estabelecidos judicialmente.\n\nPermanecemos à disposição para auxiliá-lo na regularização.\n\nAtenciosamente,",
-
   esc(v) {
     return String(v == null ? "" : v).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
   },
@@ -36,6 +34,25 @@ const CentralEmailApp = {
   podeEditar() {
     if (typeof window.hasCrmPerm !== "function") return true;
     return !!window.hasCrmPerm("sub_fin_cr_central_email_editar");
+  },
+
+  eu() {
+    const u = (typeof window.crmUsuarioAcesso === "function" && window.crmUsuarioAcesso())
+      || (window.AppState && window.AppState.currentUser)
+      || {};
+    return {
+      email: String(u.email || "").trim().toLowerCase(),
+      nome: String(u.name || "").replace(/ no usuário .+$/i, "").trim()
+    };
+  },
+
+  souAdmin() {
+    const u = (window.AppState && window.AppState.currentUser) || null;
+    return typeof window.isCrmAdministrator === "function" && window.isCrmAdministrator(u);
+  },
+
+  assinatura(t) {
+    return [t && t.nome, t && t.assunto, t && t.corpo, t && t.tag, t && t.diasVencido].join("\u0001");
   },
 
   iso(d) {
@@ -157,15 +174,25 @@ const CentralEmailApp = {
 
   normalizar(lista) {
     const tags = new Set(this.tags().map((t) => t.id));
-    return (Array.isArray(lista) ? lista : []).map((t) => ({
-      id: String((t && t.id) || ""),
-      nome: String((t && t.nome) || "").trim(),
-      assunto: String((t && t.assunto) || "").trim(),
-      corpo: String((t && t.corpo) || ""),
-      tag: tags.has(Number(t && t.tag)) ? Number(t.tag) : "",
-      diasVencido: Math.max(0, Math.round(Number(t && t.diasVencido) || 0)),
-      ativo: t && t.ativo !== false
-    })).filter((t) => t.id && t.nome);
+    return (Array.isArray(lista) ? lista : []).map((t) => {
+      const tinha = t && (t.status === "pendente" || t.status === "aprovado");
+      const status = tinha ? t.status : (t && t.ativo === false ? "pendente" : "aprovado");
+      const ativo = status === "aprovado" && (tinha ? !!(t && t.ativo) : t.ativo !== false);
+      return {
+        id: String((t && t.id) || ""),
+        nome: String((t && t.nome) || "").trim(),
+        assunto: String((t && t.assunto) || "").trim(),
+        corpo: String((t && t.corpo) || ""),
+        tag: tags.has(Number(t && t.tag)) ? Number(t.tag) : "",
+        diasVencido: Math.max(0, Math.round(Number(t && t.diasVencido) || 0)),
+        status: status,
+        ativo: status === "pendente" ? false : ativo,
+        criadoPorEmail: String((t && t.criadoPorEmail) || "").trim().toLowerCase(),
+        criadoPorNome: String((t && t.criadoPorNome) || "").trim(),
+        aprovadoEm: String((t && t.aprovadoEm) || ""),
+        avisoCriador: !!(t && t.avisoCriador)
+      };
+    }).filter((t) => t.id && t.nome);
   },
 
   lerLocal() {
@@ -227,15 +254,22 @@ const CentralEmailApp = {
     return `<div class="ml-tabs cem-tabs" role="tablist">${item("templates", "file-text", "Templates")}${item("fila", "send", "Fila do dia")}</div>`;
   },
 
+  situacao(t) {
+    if (!t || t.status !== "aprovado") return "Pendente";
+    return t.ativo ? "Ligada" : "Desligada";
+  },
+
   tabelaHtml() {
     const pode = this.podeEditar();
+    const admin = this.souAdmin();
     const linhas = this.state.templates.map((t) => `<tr>
       <td>${this.esc(t.nome)}</td>
       <td>${this.esc(this.rotuloTag(t.tag))}</td>
       <td>${this.esc(t.diasVencido)}</td>
-      <td>${t.ativo ? "Ligada" : "Desligada"}</td>
+      <td>${this.esc(this.situacao(t))}</td>
       <td class="is-right cem-acoes">
         <button type="button" class="tvig-ico" title="Ver" onclick="CentralEmailApp.verTemplate('${this.esc(t.id)}')"><i data-lucide="eye" style="width:15px;height:15px;"></i></button>
+        ${admin && t.status !== "aprovado" ? `<button type="button" class="tvig-ico" title="Aprovar" onclick="CentralEmailApp.abrirAprovacao('${this.esc(t.id)}')"><i data-lucide="check" style="width:15px;height:15px;"></i></button>` : ""}
         ${pode ? `<button type="button" class="tvig-ico" title="Editar" onclick="CentralEmailApp.editar('${this.esc(t.id)}')"><i data-lucide="pencil" style="width:15px;height:15px;"></i></button>
         <button type="button" class="tvig-ico is-danger" title="Excluir" onclick="CentralEmailApp.excluir('${this.esc(t.id)}')"><i data-lucide="trash-2" style="width:15px;height:15px;"></i></button>` : ""}
       </td>
@@ -248,7 +282,7 @@ const CentralEmailApp = {
 
   filaHtml() {
     const ativos = this.state.templates.filter((t) => t.ativo);
-    if (!ativos.length) return `<p class="cem-vazio">Nenhuma régua ligada. Em Templates, grave o texto e deixe a régua ligada.</p>`;
+    if (!ativos.length) return `<p class="cem-vazio">Nenhuma régua ligada. O administrador liga a régua ao aprovar o template.</p>`;
     if (!(window.rawClientList || []).length) {
       return `<p class="cem-vazio">A fila de cobrança ainda não foi carregada nesta sessão. Abra a Fila de Cobrança para a central localizar quem completa os dias de atraso hoje.</p>`;
     }
@@ -279,7 +313,7 @@ const CentralEmailApp = {
       ? this.filaHtml()
       : `<div class="cem-topo">${pode ? `<button type="button" class="btn btn-primary" onclick="CentralEmailApp.editar('')">Novo template</button>` : ""}</div>${this.tabelaHtml()}`;
     root.innerHTML = `
-      <p class="cem-intro">O operador escreve o e-mail com variáveis. A tag define o grupo da fila, e os dias dizem quando o título vencido entra na fila do dia. A data de retorno é o dia do envio mais a quantidade escolhida na variável.</p>
+      <p class="cem-intro">O operador escreve o e-mail com variáveis. Ao salvar, a régua fica desligada até o administrador aprovar. A tag define o grupo da fila, e os dias dizem quando o título vencido entra na fila do dia.</p>
       ${this.abasHtml()}
       <div class="cem-painel">${corpo}</div>`;
     if (window.lucide) window.lucide.createIcons({ root: root });
@@ -321,11 +355,7 @@ const CentralEmailApp = {
               <label class="cem-span">Título do e-mail<input id="cem-assunto" class="cem-campo" value="${this.esc(atual ? atual.assunto : "")}"></label>
               <label>Dias depois de vencido<input id="cem-dias" class="cem-campo" type="number" min="0" step="1" value="${atual ? atual.diasVencido : 5}"></label>
             </div>
-            <label class="moura-switch cem-liga">
-              <input type="checkbox" id="cem-ativo" ${!atual || atual.ativo ? "checked" : ""}>
-              <span class="moura-switch-track" aria-hidden="true"></span>
-              <span class="moura-switch-text">Régua ligada</span>
-            </label>
+            <p class="cem-legenda">${atual && atual.status === "aprovado" ? "Se alterar o título, o texto, a tag ou os dias, o template volta para o administrador e a régua desliga." : "Ao salvar, a régua fica desligada até o administrador aprovar."}</p>
             <label class="cem-bloco-campo">Texto<textarea id="cem-corpo" class="cem-campo">${this.esc(atual ? atual.corpo : "")}</textarea></label>
             <p class="cem-legenda">Prévia com um cliente de exemplo. Na fila do dia, nome, unidade, empreendimento, cidade e vencimento saem do contrato.</p>
             <pre id="cem-previa" class="cem-previa"></pre>
@@ -340,7 +370,6 @@ const CentralEmailApp = {
               </label>
               <button type="button" class="cem-var" onclick="CentralEmailApp.inserirRetorno()">Inserir data de retorno</button>
             </section>
-            <button type="button" class="cem-var cem-modelo" onclick="CentralEmailApp.usarModelo()">Modelo de acordo judicial</button>
           </aside>
         </div>
       </div>
@@ -379,22 +408,6 @@ const CentralEmailApp = {
     this.inserir("{{retorno:" + dias + "}}");
   },
 
-  async usarModelo() {
-    const corpo = document.getElementById("cem-corpo");
-    const assunto = document.getElementById("cem-assunto");
-    const tag = document.getElementById("cem-tag");
-    if (corpo && corpo.value.trim()) {
-      const pergunta = "Substituir o texto pelo modelo de acordo judicial?";
-      const ok = typeof window.mouraConfirm === "function" ? await window.mouraConfirm(pergunta) : confirm(pergunta);
-      if (!ok) return;
-    }
-    if (corpo) corpo.value = this.MODELO;
-    if (assunto && !assunto.value.trim()) assunto.value = "Acordo judicial — posicionamento";
-    const G = window.FILA_QUEUE_GROUPS || {};
-    if (tag && G.ACORDO_JURIDICO != null) tag.value = String(G.ACORDO_JURIDICO);
-    this.atualizarPreview();
-  },
-
   atualizarPreview() {
     const previa = document.getElementById("cem-previa");
     const corpo = document.getElementById("cem-corpo");
@@ -412,12 +425,28 @@ const CentralEmailApp = {
     const corpo = String((document.getElementById("cem-corpo") || {}).value || "");
     const tag = Number((document.getElementById("cem-tag") || {}).value);
     const dias = Math.round(Number((document.getElementById("cem-dias") || {}).value));
-    const ativo = !!((document.getElementById("cem-ativo") || {}).checked);
     if (!nome || !assunto || !corpo.trim() || !Number.isFinite(tag) || !Number.isFinite(dias) || dias < 0) {
       this.aviso("Informe o nome, o título do e-mail, o texto, a tag e os dias depois de vencido.");
       return;
     }
-    const item = { id: id || ("cem_" + Date.now().toString(36)), nome, assunto, corpo, tag, diasVencido: dias, ativo };
+    const anterior = id ? this.achar(id) : null;
+    const quem = this.eu();
+    const item = {
+      id: id || ("cem_" + Date.now().toString(36)),
+      nome, assunto, corpo, tag, diasVencido: dias,
+      criadoPorEmail: (anterior && anterior.criadoPorEmail) || quem.email,
+      criadoPorNome: (anterior && anterior.criadoPorNome) || quem.nome,
+      status: "pendente",
+      ativo: false,
+      aprovadoEm: "",
+      avisoCriador: false
+    };
+    if (anterior && this.assinatura(anterior) === this.assinatura(item)) {
+      item.status = anterior.status || "pendente";
+      item.ativo = item.status === "aprovado" && !!anterior.ativo;
+      item.aprovadoEm = anterior.aprovadoEm || "";
+      item.avisoCriador = !!anterior.avisoCriador;
+    }
     const resto = this.state.templates.filter((t) => t.id !== item.id);
     this.state.templates = resto.concat([item]);
     await this.gravar();
@@ -493,6 +522,136 @@ const CentralEmailApp = {
     try {
       if (navigator.clipboard && navigator.clipboard.writeText) await navigator.clipboard.writeText(texto);
     } catch (e) {}
+  },
+
+  pendentes() {
+    return this.state.templates.filter((t) => t.status !== "aprovado");
+  },
+
+  chaveVisto(t) {
+    return "crm_cem_visto_" + this.eu().email + "_" + t.id + "_" + (t.aprovadoEm || "");
+  },
+
+  visto(t) {
+    try { return localStorage.getItem(this.chaveVisto(t)) === "1"; } catch (e) { return false; }
+  },
+
+  marcarVisto(t) {
+    try { localStorage.setItem(this.chaveVisto(t), "1"); } catch (e) {}
+  },
+
+  avisosDoCriador() {
+    const email = this.eu().email;
+    if (!email) return [];
+    return this.state.templates.filter((t) => t.status === "aprovado" && !t.ativo && t.avisoCriador && t.criadoPorEmail === email && !this.visto(t));
+  },
+
+  async avisar() {
+    if (this._avisando || !this.eu().email) return;
+    this._avisando = true;
+    try {
+    if (!this.state.pronto) {
+      try { await this.carregar(); } catch (e) { return; }
+    }
+    if (document.getElementById("cem-modal")) return;
+    let sessao = "";
+    try { sessao = sessionStorage.getItem("crm_cem_aprov_sessao") || ""; } catch (e) {}
+    if (this.souAdmin() && this.pendentes().length && sessao !== "1") {
+      this.abrirAprovacao("");
+      return;
+    }
+    const meus = this.avisosDoCriador();
+    if (meus.length) this.abrirAvisoCriador(meus);
+    } finally {
+      this._avisando = false;
+    }
+  },
+
+  abrirAprovacao(id) {
+    if (!this.souAdmin()) return;
+    const lista = id ? this.pendentes().filter((t) => t.id === id) : this.pendentes();
+    if (!lista.length) return;
+    this.fecharModal();
+    const blocos = lista.map((t) => `<section class="cem-bloco">
+      <h4>${this.esc(t.nome)}</h4>
+      <p>${this.esc(this.rotuloTag(t.tag))} · ${this.esc(t.diasVencido)} dia(s) depois de vencido${t.criadoPorNome ? " · " + this.esc(t.criadoPorNome) : ""}</p>
+      <p>${this.esc(t.assunto)}</p>
+      <div class="cem-aprova-linha">
+        <label class="moura-switch">
+          <input type="checkbox" id="cem-ligar-${this.esc(t.id)}">
+          <span class="moura-switch-track" aria-hidden="true"></span>
+          <span class="moura-switch-text">Ligar a régua</span>
+        </label>
+        <button type="button" class="btn btn-primary btn-sm" onclick="CentralEmailApp.aprovar('${this.esc(t.id)}')">Aprovar</button>
+      </div>
+    </section>`).join("");
+    const pop = document.createElement("div");
+    pop.id = "cem-modal";
+    pop.className = "cem-modal";
+    pop.innerHTML = `<div class="cem-card cem-card-aviso" role="dialog" aria-modal="true" aria-labelledby="cem-titulo">
+      <div class="cem-head">
+        <h3 id="cem-titulo">Aprovar template</h3>
+        <button type="button" class="btn btn-fechar" id="cem-aprov-fechar">Fechar</button>
+      </div>
+      <div class="cem-body">
+        <p class="cem-legenda">A régua só liga se o interruptor estiver ligado na hora de aprovar. Sem isso, o template fica aprovado e a régua continua desligada.</p>
+        ${blocos}
+      </div>
+    </div>`;
+    document.body.appendChild(pop);
+    pop.querySelector("#cem-aprov-fechar").addEventListener("click", () => {
+      try { sessionStorage.setItem("crm_cem_aprov_sessao", "1"); } catch (e) {}
+      this.fecharModal();
+    });
+  },
+
+  async aprovar(id) {
+    if (!this.souAdmin()) return;
+    const t = this.achar(id);
+    if (!t) return;
+    const liga = document.getElementById("cem-ligar-" + id);
+    t.status = "aprovado";
+    t.ativo = !!(liga && liga.checked);
+    t.aprovadoEm = new Date().toISOString();
+    t.avisoCriador = !t.ativo;
+    await this.gravar();
+    const ainda = this.pendentes();
+    if (ainda.length && document.getElementById("cem-modal")) this.abrirAprovacao("");
+    else this.fecharModal();
+    if (document.getElementById("central-email-root")) this.render();
+  },
+
+  abrirAvisoCriador(lista) {
+    const itens = lista || [];
+    if (!itens.length) return;
+    this.fecharModal();
+    const blocos = itens.map((t) => `<section class="cem-bloco">
+      <h4>${this.esc(t.nome)}</h4>
+      <p>O template foi aprovado, mas a régua continua desligada. Deseja fazer alguma modificação antes de ligar?</p>
+      <button type="button" class="btn btn-primary btn-sm" onclick="CentralEmailApp.modificarAprovado('${this.esc(t.id)}')">Modificar</button>
+    </section>`).join("");
+    const pop = document.createElement("div");
+    pop.id = "cem-modal";
+    pop.className = "cem-modal";
+    pop.innerHTML = `<div class="cem-card cem-card-aviso" role="dialog" aria-modal="true" aria-labelledby="cem-titulo">
+      <div class="cem-head">
+        <h3 id="cem-titulo">Template aprovado</h3>
+        <button type="button" class="btn btn-fechar" id="cem-criador-fechar">Fechar</button>
+      </div>
+      <div class="cem-body">${blocos}</div>
+    </div>`;
+    document.body.appendChild(pop);
+    pop.querySelector("#cem-criador-fechar").addEventListener("click", () => {
+      itens.forEach((t) => this.marcarVisto(t));
+      this.fecharModal();
+    });
+  },
+
+  modificarAprovado(id) {
+    const t = this.achar(id);
+    if (t) this.marcarVisto(t);
+    this.fecharModal();
+    this.editar(id);
   }
 };
 
@@ -500,4 +659,19 @@ window.CentralEmailApp = CentralEmailApp;
 
 document.addEventListener("tabChanged", function (e) {
   if (e && e.detail === "central-email" && window.CentralEmailApp) CentralEmailApp.abrir();
+});
+
+document.addEventListener("DOMContentLoaded", function () {
+  let tentativas = 0;
+  const tentar = function () {
+    tentativas += 1;
+    const app = window.CentralEmailApp;
+    const u = typeof window.crmUsuarioAcesso === "function" ? window.crmUsuarioAcesso() : (window.AppState && window.AppState.currentUser);
+    if (!app || !u || !u.email) {
+      if (tentativas < 20) setTimeout(tentar, 1000);
+      return;
+    }
+    app.avisar();
+  };
+  setTimeout(tentar, 2500);
 });

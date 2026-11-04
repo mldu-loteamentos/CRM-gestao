@@ -12120,7 +12120,8 @@ textarea.cem-campo { height: auto; min-height: 180px; padding: 8px; line-height:
 .cem-var-grupo { display: flex; flex-direction: column; gap: 6px; }
 .cem-var-grupo h4 { margin: 0; color: #64748b; font-size: 0.68rem; letter-spacing: 0.04em; text-transform: uppercase; }
 .cem-var { display: block; width: 100%; text-align: left; border: 1px solid #bbf7d0; background: #f0fdf4; color: #105436; border-radius: 8px; padding: 7px 10px; font-size: 0.75rem; font-weight: 700; cursor: pointer; }
-.cem-modelo { background: #fff; }
+.cem-card-aviso { width: min(640px, 100%); }
+.cem-aprova-linha { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 8px; }
 .cem-retorno input { width: 100%; }
 .cem-legenda { margin: 8px 0; color: #64748b; font-size: 0.75rem; }
 .cem-previa { margin: 0; white-space: pre-wrap; background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 10px; padding: 12px; color: #1e293b; font-family: inherit; font-size: 0.85rem; line-height: 1.45; }

@@ -53,7 +53,6 @@
       ]},
       { id: "config_cr", label: "Configurações (CR)", abas: [
         { id: "regra-regua", label: "Régua de Cobrança" },
-        { id: "regra-financiamento", label: "Etapas Financiamento" },
         { id: "regra-atribuicao", label: "Atribuição de Operadores" },
         { id: "regra-negociacao", label: "Regras de Negociação" },
         { id: "regra-fila", label: "Fila de Cobrança" },
@@ -77,8 +76,11 @@
       { id: "fluxo_caixa", label: "Fluxo de caixa (DFC)" },
       { id: "fluxo_diario", label: "Fluxo de caixa diário" },
       { id: "resultado_caixa", label: "Resultado de caixa" },
-      { id: "financiamento", label: "Financiamento" },
       { id: "repactuacao", label: "Repactuação" }
+    ]},
+    { id: "financiamento", label: "Financiamento", subs: [
+      { id: "financiamento", label: "Financiamento" },
+      { id: "config", label: "Configurações" }
     ]},
     { id: "juridico", label: "Jurídico", subs: [
       { id: "subjudice", label: "Cobrança Sub judice" },

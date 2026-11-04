@@ -236,6 +236,15 @@ const ConfigUsersApp = {
       savedPerms.mod_orc = true;
       savedPerms.sub_orc_geral = true;
     }
+    if (!savedPerms.mod_financiamento && (
+      savedPerms.sub_fin_finan === true
+      || savedPerms.sub_fin_finan_financiamento_acessar === true
+      || savedPerms.sub_fin_finan_financiamento_visualizar === true
+      || savedPerms.sub_fin_finan_financiamento_editar === true
+    )) {
+      savedPerms.mod_financiamento = true;
+      savedPerms.sub_financiamento_geral = true;
+    }
     if (!savedPerms.mod_gerencial && (
       savedPerms.sub_part_geral_participacoes_acessar === true
       || savedPerms.sub_soc_geral_estrutura_societaria_acessar === true
@@ -459,14 +468,17 @@ const ConfigUsersApp = {
           ]
         },
         {
-          name: "Financiamento", key: "sub_fin_finan",
-          actions: [{ id: "financiamento", label: "Financiamento" }]
-        },
-        {
           name: "Repactuação", key: "sub_fin_repac",
           actions: [{ id: "repactuacao", label: "Repactuação" }]
         }
       ]
+    },
+    {
+      name: "Financiamento", icon: "landmark", key: "mod_financiamento",
+      submodules: [{ name: "Financiamento", key: "sub_financiamento_geral", actions: [
+        { id: "financiamento", label: "Financiamento", permBase: "sub_fin_finan_financiamento" },
+        { id: "config", label: "Configurações", permBase: "sub_financiamento_geral_config" }
+      ] }]
     },
     {
       name: "Contábil", icon: "book-open", key: "mod_contabil",

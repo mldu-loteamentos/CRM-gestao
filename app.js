@@ -3698,6 +3698,15 @@ function switchTab(tabId, titleOverride, showLoader = false) {
       return;
     }
   }
+  if (tabId === 'financiamento-config' && typeof window.hasCrmPerm === 'function') {
+    const podeFin = window.hasCrmPerm('sub_financiamento_geral_config_acessar')
+      || window.hasCrmPerm('sub_financiamento_geral_config_visualizar')
+      || window.hasCrmPerm('sub_financiamento_geral_config_editar');
+    if (!podeFin) {
+      alert('Sem permissão para acessar Configurações do Financiamento.');
+      return;
+    }
+  }
   const leavingTab = window.activeAppTab;
   if (leavingTab && leavingTab !== tabId) {
     if (leavingTab === "prestacao-contas" && window.PrestacaoContasApp && typeof PrestacaoContasApp.reiniciar === "function") {
@@ -3822,6 +3831,7 @@ function switchTab(tabId, titleOverride, showLoader = false) {
     "orcamento-acompanhamento": "Acompanhamento",
     "investimento": "Aplicações e Investimentos",
     "financiamento": "Financiamento",
+    "financiamento-config": "Configurações",
     "repactuacao-lote": "Repactuação",
     "parametrizacao-parceiro": "Configurações",
     "estrutura-societaria": "Organograma Societário",
@@ -3913,6 +3923,7 @@ function switchTab(tabId, titleOverride, showLoader = false) {
     "orcamento-acompanhamento": "bar-chart-3",
     "investimento": "trending-up",
     "financiamento": "landmark",
+    "financiamento-config": "sliders",
     "repactuacao-lote": "refresh-cw",
     "parametrizacao-parceiro": "handshake",
     "estrutura-societaria": "git-fork",
@@ -4172,6 +4183,8 @@ function switchTab(tabId, titleOverride, showLoader = false) {
     };
     bootFin();
     setTimeout(bootFin, 0);
+  } else if (tabId === "financiamento-config") {
+    if (typeof window.renderEtapasFinanciamento === "function") window.renderEtapasFinanciamento();
   } else if (tabId === "repactuacao-lote") {
     const bootRepac = () => {
       try {
@@ -5166,6 +5179,9 @@ async function processSuccessfulLogin(loggedUser) {
       }
       if (window.DocAssinaturaApp && typeof window.DocAssinaturaApp.avisarPendentes === "function") {
         window.DocAssinaturaApp.avisarPendentes();
+      }
+      if (window.CentralEmailApp && typeof window.CentralEmailApp.avisar === "function") {
+        window.CentralEmailApp.avisar();
       }
       if (typeof window.avisarRepactuacaoUltimoDia === "function") {
         window.avisarRepactuacaoUltimoDia();
@@ -7137,6 +7153,11 @@ window.permCoversMenuKey = function(perms, modKey) {
     const bases = ["sub_orc_geral_novo_orcamento", "sub_orc_geral_novo_forecast", "sub_fin_orc_orcamento"];
     return bases.some((b) => perms[b + "_acessar"] === true || perms[b + "_visualizar"] === true || perms[b + "_editar"] === true);
   }
+  if (modKey === "mod_financiamento") {
+    if (perms.mod_financiamento === true || perms.sub_fin_finan === true || perms.sub_financiamento_geral === true) return true;
+    const basesFin = ["sub_fin_finan_financiamento", "sub_financiamento_geral_config"];
+    return basesFin.some((b) => perms[b + "_acessar"] === true || perms[b + "_visualizar"] === true || perms[b + "_editar"] === true);
+  }
   if (modKey === "sub_fin_orc_orcamento_acessar" && perms.sub_fin_orc === true) return true;
   if (!String(modKey).endsWith("_acessar")) return false;
   const stem = String(modKey).slice(0, -"_acessar".length);
@@ -7201,7 +7222,7 @@ window.applyRulesModulePermissions = function() {
   const canViewNeg = window.hasFinCrAction("regras_negociacao", "visualizar");
   const canEditNeg = window.hasFinCrAction("regras_negociacao", "editar");
 
-  ["regua", "financiamento", "atribuicao", "fila", "cartao", "alcada", "alcada-distrato", "honorarios-internos", "home-office"].forEach(id => {
+  ["regua", "atribuicao", "fila", "cartao", "alcada", "alcada-distrato", "honorarios-internos", "home-office"].forEach(id => {
     const btn = document.getElementById("btn-regra-" + id);
     if (btn) btn.style.display = canAccCob ? "" : "none";
   });
@@ -7209,7 +7230,6 @@ window.applyRulesModulePermissions = function() {
   if (btnNeg) btnNeg.style.display = canAccNeg ? "" : "none";
 
   window.setRulesSectionMode(document.getElementById("content-regra-regua"), canViewCob, canEditCob);
-  window.setRulesSectionMode(document.getElementById("content-regra-financiamento"), canViewCob, canEditCob);
   window.setRulesSectionMode(document.getElementById("content-regra-atribuicao"), canViewCob, canEditCob);
   window.setRulesSectionMode(document.getElementById("content-regra-fila"), canViewCob, canEditCob);
   window.setRulesSectionMode(document.getElementById("content-regra-cartao"), canViewCob, canEditCob);
@@ -7249,6 +7269,10 @@ window.applyRulesModulePermissions = function() {
 window.switchRegrasTab = function(tabId) {
   if (tabId === "regra-judiciais") {
     if (typeof window.switchTab === "function") window.switchTab("juridico-config", "Configurações");
+    return;
+  }
+  if (tabId === "regra-financiamento") {
+    if (typeof window.switchTab === "function") window.switchTab("financiamento-config", "Configurações");
     return;
   }
   const isNeg = tabId === "regra-negociacao";
@@ -7291,9 +7315,6 @@ window.switchRegrasTab = function(tabId) {
   }
   if (tabId === "regra-negociacao" && typeof window.paintRenegotiationBlockSummary === "function") {
     window.paintRenegotiationBlockSummary();
-  }
-  if (tabId === "regra-financiamento" && typeof window.renderEtapasFinanciamento === "function") {
-    window.renderEtapasFinanciamento();
   }
   if (tabId === "regra-honorarios-internos" && typeof window.paintHonorariosInternosPct === "function") {
     window.paintHonorariosInternosPct();
@@ -15328,9 +15349,10 @@ function formatCpfCnpj(val) {
   document.getElementById("det-project-name").textContent = projectFromName;
   
   if (blockLotFromName !== "N/D" && blockLotFromName !== "") {
-    document.getElementById("det-block-lot").innerHTML = `<span style="display:flex; align-items:center; white-space: nowrap;" id="det-block-lot-span">${blockLotFromName} <button onclick="copyToClipboard('${blockLotFromName}', this)" style="background: none; border: none; padding: 4px; cursor: pointer; display: inline-flex; align-items: center; justify-content: center; margin-left: 6.5px; transition: transform 0.2s, opacity 0.2s; opacity: 0.7; white-space: nowrap;" onmouseover="this.style.opacity=1; this.style.transform='scale(1.15)'" onmouseout="this.style.opacity=0.7; this.style.transform='scale(1)'" title="Copiar Quadra/Lote">
+    const lotEsc = String(blockLotFromName).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/"/g, "&quot;");
+    document.getElementById("det-block-lot").innerHTML = `<span style="display:flex; align-items:center; flex-wrap:wrap; gap:6px;" id="det-block-lot-span"><span>${lotEsc}</span> <button type="button" class="btn-icon-ge" data-copy="${lotEsc}" onclick="copyToClipboard(this.getAttribute('data-copy'), this)" style="background: none; border: none; padding: 4px; cursor: pointer; display: inline-flex; align-items: center; justify-content: center; transition: transform 0.2s, opacity 0.2s; opacity: 0.7;" onmouseover="this.style.opacity=1; this.style.transform='scale(1.15)'" onmouseout="this.style.opacity=0.7; this.style.transform='scale(1)'" title="Copiar Quadra/Lote">
       <i data-lucide="copy" style="width: 13px; height: 13px; color: var(--color-primary);"></i>
-    </button></span>`;
+    </button><button type="button" id="det-abrir-lote" class="btn-icon-ge" disabled style="border:none;padding:4px 8px;display:inline-flex;align-items:center;gap:4px;border-radius:4px;font-size:0.75rem;font-weight:bold;background:#e2e8f0;color:#475569;">Abrir Lote</button></span>`;
     
     // Buscar coordenadas do KMZ para exibir o botão do Google Earth
     if (empIdToUse !== "N/D") {
@@ -15338,51 +15360,26 @@ function formatCpfCnpj(val) {
       const kmzRef = doc(window.firebaseDb, 'kmz_coordinates', empIdToUse);
       getDoc(kmzRef).then(async docSnap => {
           let data = [];
-          if (docSnap.exists()) {
-             data = docSnap.data().placemarks || [];
-          }
           const span = document.getElementById("det-block-lot-span");
           if (!span) return;
-          
-          let kmzMissing = false;
-          if (!Array.isArray(data) || data.length === 0) {
-            kmzMissing = true;
-            // KMZ not uploaded
-            const btnGe = document.createElement("button");
-            btnGe.className = "btn-icon-ge disabled";
-            btnGe.style.cssText = "background: #ccc; border: none; color: #666; padding: 4px 8px; cursor: not-allowed; display: inline-flex; align-items: center; gap: 4px; justify-content: center; margin-left: 8px; border-radius: 4px; font-size: 0.75rem; font-weight: bold; white-space: nowrap;";
-            btnGe.innerHTML = `<i data-lucide="globe" style="width: 14px; height: 14px;"></i> Lote Indisponível`;
-            btnGe.title = "Nenhum KMZ carregado para este Centro de Custo.";
-            span.appendChild(btnGe);
-            if (window.lucide) lucide.createIcons();
-          }
+          const existe = docSnap && (typeof docSnap.exists === "function" ? docSnap.exists() : docSnap.exists);
+          if (existe) data = (docSnap.data() || {}).placemarks || [];
 
+          let kmzMissing = false;
+          if (!Array.isArray(data) || data.length === 0) kmzMissing = true;
+
+          const nomeLote = (p) => (p && (p.name || p.lot_name || p.lotName)) || "";
           const match = kmzMissing ? null : data.find(p => {
-            if (!p || !p.name || typeof window.kmzLotMatches !== "function") return false;
-            return window.kmzLotMatches(p.name, unitDisplayStr, empIdToUse)
-              || window.kmzLotMatches(p.name, blockLotFromName, empIdToUse);
+            const nome = nomeLote(p);
+            if (!nome || typeof window.kmzLotMatches !== "function") return false;
+            return window.kmzLotMatches(nome, unitDisplayStr, empIdToUse)
+              || window.kmzLotMatches(nome, blockLotFromName, empIdToUse);
           });
-          
-          if (!kmzMissing) {
-            const btnGe = document.createElement("button");
-            btnGe.className = "btn-icon-ge";
-            
-            if (match && (match.coords || match.coordinates)) {
-              btnGe.style.cssText = "background: #105436; border: none; color: white; padding: 4px 8px; cursor: pointer; display: inline-flex; align-items: center; gap: 4px; justify-content: center; margin-left: 8px; border-radius: 4px; font-size: 0.75rem; font-weight: bold; transition: all 0.2s; white-space: nowrap;";
-              btnGe.innerHTML = `<i data-lucide="globe" style="width: 14px; height: 14px;"></i> Abrir Lote`;
-              btnGe.title = "Visualizar lote no Google Earth";
-              btnGe.onclick = (e) => {
-                e.preventDefault();
-                e.stopPropagation();
-                abrirLoteGoogleEarth(blockLotFromName, (match.coords || match.coordinates), empIdToUse);
-              };
-            } else {
-              btnGe.style.cssText = "background: #ccc; border: none; color: #666; padding: 4px 8px; cursor: not-allowed; display: inline-flex; align-items: center; gap: 4px; justify-content: center; margin-left: 8px; border-radius: 4px; font-size: 0.75rem; font-weight: bold; white-space: nowrap;";
-              btnGe.innerHTML = `<i data-lucide="globe" style="width: 14px; height: 14px;"></i> Lote Indisponível`;
-              btnGe.title = "Lote não encontrado no arquivo KMZ carregado.";
-            }
-            span.appendChild(btnGe);
-            if (window.lucide) lucide.createIcons();
+          const coordsLote = match && (match.coords || match.coordinates);
+          if (coordsLote && typeof window.fichaAtualizarBotaoLote === "function") {
+            window.fichaAtualizarBotaoLote("abrir", coordsLote, blockLotFromName, empIdToUse);
+          } else if (typeof window.fichaAtualizarBotaoLote === "function") {
+            window.fichaAtualizarBotaoLote(kmzMissing ? "sem-arquivo" : "sem-lote", "", blockLotFromName, empIdToUse);
           }
 
           // Validação Espacial Turf.js
@@ -15561,6 +15558,9 @@ function formatCpfCnpj(val) {
         })
         .catch(err => {
           console.error("Erro ao buscar coordenadas KMZ", err);
+          if (typeof window.fichaAtualizarBotaoLote === "function") {
+            window.fichaAtualizarBotaoLote("sem-arquivo", "", blockLotFromName, empIdToUse);
+          }
           if (window._addressesToValidate) {
             for (const addr of window._addressesToValidate) {
               const badge = document.getElementById(addr.id);
@@ -42758,6 +42758,20 @@ window.renderEtapasFinanciamento = function() {
 
   container.innerHTML = rootItems.map(n => renderNode(n, 0)).join("");
   if (typeof lucide !== "undefined") lucide.createIcons();
+  if (typeof window.aplicarModoConfigFinanciamento === "function") window.aplicarModoConfigFinanciamento();
+};
+
+window.aplicarModoConfigFinanciamento = function() {
+  const root = document.getElementById("tab-financiamento-config");
+  if (!root || typeof window.hasCrmPerm !== "function") return;
+  const canEdit = window.hasCrmPerm("sub_financiamento_geral_config_editar");
+  root.querySelectorAll("input, select, textarea, button").forEach((el) => {
+    el.disabled = !canEdit;
+    el.style.pointerEvents = canEdit ? "" : "none";
+  });
+  root.querySelectorAll("[draggable]").forEach((el) => {
+    el.draggable = !!canEdit;
+  });
 };
 
 window.openEtapaFinanciamentoModal = function(id = "new", parentId = null) {
@@ -45617,6 +45631,40 @@ async function deleteKMZ(empId) {
     alert("Erro ao excluir KMZ: " + error.message);
   }
 }
+
+window.fichaAtualizarBotaoLote = function(estado, coords, lotName, empId) {
+  const span = document.getElementById("det-block-lot-span");
+  if (!span) return;
+  let btn = document.getElementById("det-abrir-lote");
+  if (!btn) {
+    btn = document.createElement("button");
+    btn.id = "det-abrir-lote";
+    btn.type = "button";
+    btn.className = "btn-icon-ge";
+    span.appendChild(btn);
+  }
+  const base = "border:none;padding:4px 8px;display:inline-flex;align-items:center;gap:4px;justify-content:center;margin-left:8px;border-radius:4px;font-size:0.75rem;font-weight:bold;white-space:nowrap;";
+  if (estado === "abrir" && coords) {
+    btn.disabled = false;
+    btn.style.cssText = base + "background:#105436;color:#fff;cursor:pointer;";
+    btn.innerHTML = `<i data-lucide="globe" style="width:14px;height:14px;"></i> Abrir Lote`;
+    btn.title = "Visualizar lote no mapa";
+    btn.onclick = function(e) {
+      e.preventDefault();
+      e.stopPropagation();
+      abrirLoteGoogleEarth(lotName, coords, empId);
+    };
+  } else {
+    btn.disabled = true;
+    btn.style.cssText = base + "background:#e2e8f0;color:#475569;cursor:not-allowed;";
+    btn.innerHTML = `<i data-lucide="globe" style="width:14px;height:14px;"></i> Abrir Lote`;
+    btn.title = estado === "sem-arquivo"
+      ? "Nenhum KMZ carregado para este empreendimento."
+      : "Lote não encontrado no arquivo KMZ carregado.";
+    btn.onclick = null;
+  }
+  if (window.lucide) lucide.createIcons();
+};
 
 function abrirLoteGoogleEarth(lotName, coordinatesStr, empId = null) {
   try {
