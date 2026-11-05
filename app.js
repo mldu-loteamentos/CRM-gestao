@@ -16681,11 +16681,14 @@ function formatCpfCnpj(val) {
     AppState.currentContractInstallments = currentContractInstallments;
     if (typeof window.atualizarCanalBaixaWebro === "function") window.atualizarCanalBaixaWebro();
     if (typeof window.nexRememberInstallmentPayments === "function") {
-      window.nexRememberInstallmentPayments(
-        AppState.selectedCustomerId,
-        AppState.selectedSaleId || AppState.currentReceivableBillId,
-        currentContractInstallments
-      );
+      const payIds = [AppState.currentReceivableBillId, AppState.selectedTitulo, AppState.selectedSaleId];
+      const paySeen = new Set();
+      payIds.forEach(function(id) {
+        const t = String(id == null ? "" : id).replace(/^B-/i, "").split("-")[0];
+        if (!t || paySeen.has(t)) return;
+        paySeen.add(t);
+        window.nexRememberInstallmentPayments(AppState.selectedCustomerId, t, currentContractInstallments);
+      });
     }
     if (typeof window.syncQuitacaoSiTypesToFila === "function") {
       try {
@@ -23620,15 +23623,27 @@ window.ensureDistratoObrasCloud = function() {
   }).catch(() => {});
 };
 
+window.distratoNomeObraIgual = function(a, b) {
+  if (!a || !b || a.length < 8 || b.length < 8) return false;
+  if (a === b) return true;
+  const pedaco = (s) => String(s).split(" - ").filter(Boolean).pop() || s;
+  const pa = pedaco(a);
+  const pb = pedaco(b);
+  return pa.length >= 8 && pa === pb;
+};
+
 window.isDistratoObraEmAndamento = function() {
   const obras = window.distratoObrasMap();
+  const ligado = (entry) => entry === true || !!(entry && entry.isOn);
+  const id = window.distratoCentroId();
+  if (id) return Object.prototype.hasOwnProperty.call(obras, id) && ligado(obras[id]);
   const cand = window.distratoCcCandidates();
+  for (let i = 0; i < cand.ids.length; i++) {
+    if (Object.prototype.hasOwnProperty.call(obras, cand.ids[i]) && ligado(obras[cand.ids[i]])) return true;
+  }
   const keys = Object.keys(obras);
   for (let i = 0; i < keys.length; i++) {
-    const entry = obras[keys[i]];
-    const on = entry === true || !!(entry && entry.isOn);
-    if (!on) continue;
-    if (cand.ids.indexOf(String(keys[i])) >= 0) return true;
+    if (!ligado(obras[keys[i]])) continue;
     let obraNome = window.distratoFoldEmp(keys[i]);
     if (typeof window.knownCostCenterName === "function") {
       const known = window.distratoFoldEmp(window.knownCostCenterName(keys[i]));
@@ -23638,12 +23653,7 @@ window.isDistratoObraEmAndamento = function() {
       const ccNome = window.distratoFoldEmp(getCostCenterName(keys[i]));
       if (ccNome && !/^C\.C\./.test(ccNome)) obraNome = ccNome;
     }
-    if (obraNome.length >= 12 && cand.names.some((n) => {
-      if (n === obraNome) return true;
-      const curto = n.length < obraNome.length ? n : obraNome;
-      const longo = n.length < obraNome.length ? obraNome : n;
-      return curto.length >= 18 && longo.indexOf(curto) >= 0;
-    })) return true;
+    if (cand.names.some((n) => window.distratoNomeObraIgual(n, obraNome))) return true;
   }
   return false;
 };
@@ -35436,12 +35446,22 @@ window.nexClearLostPayment = function(item) {
 
 window.nexMarkLostPayment = function(item, payIso) {
   const iso = window.nexParseIso(payIso);
-  if (!item || !iso || item.lostPayIso === iso) return;
+  if (!item || !iso) return;
   item.lostPayIso = iso;
   const cid = String(item.customerId || "");
   const titulo = String(item.titulo || item.saleId || "");
-  const key = item._key || (cid && titulo ? window.nexHistoryKey(cid, titulo) : "");
-  const rows = window._nexHistory && key ? window._nexHistory[key] : null;
+  let key = item._key || (cid && titulo ? window.nexHistoryKey(cid, titulo) : "");
+  let rows = window._nexHistory && key ? window._nexHistory[key] : null;
+  if (!Array.isArray(rows) && window._nexHistory && item.id) {
+    const keys = Object.keys(window._nexHistory);
+    for (let i = 0; i < keys.length; i++) {
+      const bag = window._nexHistory[keys[i]];
+      if (!Array.isArray(bag) || !bag.some((x) => x && String(x.id) === String(item.id))) continue;
+      key = keys[i];
+      rows = bag;
+      break;
+    }
+  }
   if (!Array.isArray(rows)) return;
   const live = rows.find((x) => x && String(x.id) === String(item.id));
   if (!live || live.lostPayIso === iso) return;
@@ -35449,7 +35469,9 @@ window.nexMarkLostPayment = function(item, payIso) {
   window._nexHistStamp = (window._nexHistStamp || 0) + 1;
   window._nexCollectCache = null;
   window._nexCumpridaSet = null;
-  window.saveNexHistory(cid, titulo, rows).catch(() => {});
+  const saveCid = cid || String(key).split("_")[0];
+  const saveTitulo = titulo || String(key).split("_").slice(1).join("_");
+  window.saveNexHistory(saveCid, saveTitulo, rows).catch(() => {});
 };
 
 window.nexLostValidityByPayment = function(item) {
@@ -35565,6 +35587,68 @@ window.nexScheduleCumpridaCheck = function() {
     if (tab && tab.style.display !== "none" && window.AppState && AppState.defaultersLoaded && typeof loadDashboardData === "function") {
       loadDashboardData(false);
     }
+  });
+};
+
+window.nexScheduleFollowupPayCheck = function() {
+  if (window._nexFollowPayChecking || typeof window.nexCollectAll !== "function") return;
+  if (!window.SiengeApiService || typeof SiengeApiService.getCustomerFinancialStatements !== "function") return;
+  if (!window._nexPayAttempted) window._nexPayAttempted = new Set();
+  const pending = window.nexCollectAll().filter(function(it) {
+    if (!it || (typeof window.nexItemEhCec === "function" && window.nexItemEhCec(it))) return false;
+    if (!window.nexInFollowup(it)) return false;
+    if (window.nexPayEvidenceReady(it)) return false;
+    const key = window.nexPayKey(it.customerId, it.titulo || it.saleId);
+    return !!(key && !window._nexPayAttempted.has(key));
+  });
+  if (!pending.length) return;
+  const byCustomer = new Map();
+  pending.forEach(function(it) {
+    const cid = String(it.customerId || "");
+    const titulo = String(it.titulo || it.saleId || "").replace(/^B-/i, "").split("-")[0];
+    const key = window.nexPayKey(cid, titulo);
+    if (!cid || !key) return;
+    window._nexPayAttempted.add(key);
+    if (!byCustomer.has(cid)) byCustomer.set(cid, []);
+    if (byCustomer.get(cid).indexOf(titulo) < 0) byCustomer.get(cid).push(titulo);
+  });
+  if (!byCustomer.size) return;
+  window._nexFollowPayChecking = true;
+  const entries = Array.from(byCustomer.entries());
+  const takeBills = function(res) {
+    const bills = [];
+    (res && res.results || []).forEach(function(item) {
+      if (item && Array.isArray(item.billsReceivable)) bills.push.apply(bills, item.billsReceivable);
+      else if (item && Array.isArray(item.installments)) bills.push(item);
+    });
+    return bills;
+  };
+  const one = async function(pair) {
+    const cid = pair[0];
+    const titulos = pair[1];
+    try {
+      const res = await SiengeApiService.getCustomerFinancialStatements(cid);
+      const seen = new Set();
+      takeBills(res).forEach(function(bill) {
+        const id = String(bill.billReceivableId || bill.receivableBillId || bill.id || "").replace(/^B-/i, "").split("-")[0];
+        if (!id || titulos.indexOf(id) < 0 || seen.has(id)) return;
+        seen.add(id);
+        window.nexRememberInstallmentPayments(cid, id, bill.installments || []);
+      });
+    } catch (e) {
+      console.warn("[NEX] pagamentos do follow-up", e);
+    }
+  };
+  const run = async function() {
+    const size = 4;
+    for (let i = 0; i < entries.length; i += size) {
+      await Promise.all(entries.slice(i, i + size).map(one));
+    }
+  };
+  run().then(function() {
+    window._nexFollowPayChecking = false;
+    window._nexCollectCache = null;
+    if (typeof window.renderNexFollowup === "function") window.renderNexFollowup();
   });
 };
 
@@ -38764,6 +38848,7 @@ window.renderNexFollowup = function() {
   const body = document.getElementById("nex-followup-body");
   if (!body) return;
   if (typeof window.nexEnsureLookups === "function") window.nexEnsureLookups(true);
+  if (typeof window.nexScheduleFollowupPayCheck === "function") window.nexScheduleFollowupPayCheck();
   const zeroOnlyChk = document.getElementById("nex-followup-zero-only");
   const zeroOnly = window.getNexFollowupZeroOnly();
   if (zeroOnlyChk) zeroOnlyChk.checked = zeroOnly;

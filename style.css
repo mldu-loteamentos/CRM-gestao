@@ -5674,7 +5674,8 @@ body.fc-nome-dragging * {
 }
 .dist-obra-scroll { max-height: 420px; overflow: auto; }
 .dist-obra-table {
-  width: 100%;
+  width: max-content;
+  min-width: 100%;
   border-collapse: collapse;
   font-size: 0.82rem;
 }
@@ -5697,6 +5698,9 @@ body.fc-nome-dragging * {
   border-bottom: 1px solid #e2e8f0;
   vertical-align: middle;
   color: #1e293b;
+}
+.dist-obra-table td.dist-obra-nome {
+  white-space: nowrap;
 }
 .dist-obra-table tbody tr:hover { background: #ecf4ef; }
 .dist-obra-table .dist-obra-previsao {

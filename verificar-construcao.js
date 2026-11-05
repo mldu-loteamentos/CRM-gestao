@@ -1152,23 +1152,23 @@ window.VerificarConstrucaoApp = {
 
             <!-- Modal Obras em Andamento -->
             <div id="modal-obras-andamento" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.55); z-index:99999; align-items:flex-start; justify-content:center; padding-top:40px; overflow-y:auto;">
-                <div style="background:#fff; border-radius:14px; width:660px; max-width:95%; box-shadow:0 24px 80px rgba(0,0,0,0.35); margin-bottom:40px;">
-                    <div style="padding:22px 28px; border-bottom:2px solid #1a4731; display:flex; justify-content:space-between; align-items:center; background: linear-gradient(135deg, #2e6b3e 0%, #3d7a4a 100%); border-radius: 14px 14px 0 0;">
-                        <div style="display:flex; align-items:center; gap:12px;">
-                            <div style="width:36px; height:36px; background:rgba(255,255,255,0.15); border-radius:8px; display:flex; align-items:center; justify-content:center;">
+                <div style="background:#fff; border-radius:14px; width:920px; max-width:95%; box-shadow:0 24px 80px rgba(0,0,0,0.35); margin-bottom:40px;">
+                    <div style="padding:22px 28px; border-bottom:2px solid #1a4731; display:flex; justify-content:space-between; align-items:center; gap:16px; background: linear-gradient(135deg, #2e6b3e 0%, #3d7a4a 100%); border-radius: 14px 14px 0 0;">
+                        <div style="display:flex; align-items:center; gap:12px; min-width:0;">
+                            <div style="width:36px; height:36px; background:rgba(255,255,255,0.15); border-radius:8px; display:flex; align-items:center; justify-content:center; flex:none;">
                                 <svg width="20" height="20" fill="none" stroke="#fff" stroke-width="2" viewBox="0 0 24 24"><rect x="2" y="7" width="20" height="14" rx="2"/><path d="M16 7V5a2 2 0 00-2-2h-4a2 2 0 00-2 2v2"/></svg>
                             </div>
-                            <div>
+                            <div style="min-width:0;">
                                 <h2 style="margin:0; font-size:1.1rem; color:#fff; font-weight:600;">Obras em Andamento</h2>
                                 <p style="margin:2px 0 0; font-size:0.78rem; color:rgba(255,255,255,0.7);">Empreendimentos com obra ativa — clientes dispensados de vistoria</p>
                             </div>
                         </div>
+                        <button type="button" class="btn btn-fechar" onclick="document.getElementById('modal-obras-andamento').style.display='none'">Fechar</button>
                     </div>
-                    <div style="padding:20px 28px; max-height:55vh; overflow-y:auto;">
+                    <div style="padding:20px 28px; max-height:55vh; overflow:auto;">
                         <div id="obras-andamento-list">Carregando...</div>
                     </div>
                     <div style="padding:18px 28px; border-top:1px solid #e2e8f0; display:flex; justify-content:flex-end; gap:12px; background:#f8fafc; border-radius: 0 0 14px 14px;">
-                        <button type="button" class="btn btn-fechar" onclick="document.getElementById('modal-obras-andamento').style.display='none'">Fechar</button>
                         <button onclick="window.VerificarConstrucaoApp.salvarObrasAndamento()" style="padding:10px 22px; border:none; color:#fff; background:linear-gradient(135deg, #153123 0%, #1e4a35 100%); border-radius:8px; cursor:pointer; font-weight:600; font-size:0.9rem; display:flex; align-items:center; gap:6px; box-shadow:0 4px 12px rgba(21,49,35,0.3); transition: all 0.2s;" onmouseover="this.style.opacity='0.9'" onmouseout="this.style.opacity='1'">
                             <svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M19 21H5a2 2 0 01-2-2V5a2 2 0 012-2h11l5 5v11a2 2 0 01-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>
                             Salvar
@@ -1730,7 +1730,7 @@ window.VerificarConstrucaoApp = {
 
             html += `
                 <tr class="dist-obra-row">
-                    <td><strong>${label}</strong> ${badgeNew}</td>
+                    <td class="dist-obra-nome" title="${String(label).replace(/"/g, '&quot;')}"><strong>${label}</strong>${badgeNew}</td>
                     <td class="dist-obra-switch">
                         <label class="moura-switch" id="${toggleId}-label" title="Obra em andamento">
                             <input type="checkbox" id="${toggleId}" ${isOn ? 'checked' : ''} data-emp="${String(costCenterId).replace(/"/g, '&quot;')}" onchange="window.VerificarConstrucaoApp._onToggleObraChange(this)">

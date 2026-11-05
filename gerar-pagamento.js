@@ -180,24 +180,34 @@ const GerarPagamentoApp = {
   },
 
   /** Analista de Tesouraria I e II, e administrador. */
-  usuarioVeConferenciaLotes() {
+  usuarioConferencia() {
     let u = window.AppState && window.AppState.currentUser;
     if (!u) {
       try { u = JSON.parse(localStorage.getItem("crm_logged_user") || "null"); } catch (e) { u = null; }
     }
-    if (!u) return false;
     const imp = typeof window.crmImpersonacaoAtual === "function" ? window.crmImpersonacaoAtual() : null;
-    const efetivo = imp || u;
-    if (!imp && typeof window.isCrmAdministrator === "function" && window.isCrmAdministrator(u)) return true;
+    return imp || u || null;
+  },
+
+  usuarioVeConferenciaLotes() {
+    const efetivo = this.usuarioConferencia();
+    if (!efetivo) return false;
+    const u = window.AppState && window.AppState.currentUser;
+    const imp = typeof window.crmImpersonacaoAtual === "function" ? window.crmImpersonacaoAtual() : null;
+    if (!imp && u && typeof window.isCrmAdministrator === "function" && window.isCrmAdministrator(u)) return true;
     const n = this.perfilFold(efetivo.profile_name || efetivo.profile || efetivo.role || "");
     if (n === "ADMINISTRADOR" || (typeof window.isCrmAdminProfileName === "function" && window.isCrmAdminProfileName(efetivo.profile_name || n))) return true;
     return n.includes("ANALISTA") && n.includes("TESOURARIA") && /\b(I|II|1|2)\b/.test(n);
   },
 
   chaveConferenciaLotes(dia) {
-    const u = (window.AppState && window.AppState.currentUser) || {};
+    const u = this.usuarioConferencia() || {};
     const quem = String(u.email || u.name || "op").toLowerCase();
     return "crm_lotes_conf_" + quem + "_" + dia;
+  },
+
+  marcarConferenciaVista(dia) {
+    try { localStorage.setItem(this.chaveConferenciaLotes(dia), "ciente"); } catch (e) {}
   },
 
   /** 15:30: pede para atualizar a situação dos lotes. Se o login for depois, abre na hora, uma vez no dia. */
@@ -248,7 +258,7 @@ const GerarPagamentoApp = {
     </div>`;
     document.body.appendChild(overlay);
     overlay.querySelector("#gp-conf-fechar").addEventListener("click", () => {
-      try { localStorage.setItem(this.chaveConferenciaLotes(hoje), "ciente"); } catch (e) {}
+      this.marcarConferenciaVista(hoje);
       overlay.remove();
     });
     overlay.querySelector("#gp-conf-buscar").addEventListener("click", () => this.buscarAtualizacaoLotes());
@@ -367,7 +377,13 @@ const GerarPagamentoApp = {
           });
         });
       });
-      const fila = [...porChave.values()];
+      const fila = [...porChave.values()].filter((row) => {
+        const venc = String(row.vencimento || "").slice(0, 10);
+        const baixa = String(row.baixa || venc).slice(0, 10);
+        const aVencerSaiu = !!(venc && venc > hoje && row.saiu);
+        const doDiaOuVencido = (baixa && baixa <= hoje && (!desde || baixa >= desde)) || (venc && venc <= hoje && (!desde || venc >= desde));
+        return aVencerSaiu || doDiaOuVencido;
+      });
       const porTitulo = new Map();
       fila.forEach((row) => {
         const lista = porTitulo.get(row.titulo) || [];
@@ -375,15 +391,13 @@ const GerarPagamentoApp = {
         porTitulo.set(row.titulo, lista);
       });
       const ids = [...porTitulo.keys()];
-      let feitos = 0;
       const instPorTitulo = new Map();
       const worker = async () => {
         while (ids.length) {
           const id = ids.shift();
           const lista = await this.lerParcelasTitulo(id);
           instPorTitulo.set(id, lista);
-          feitos += 1;
-          if (status) status.textContent = "Consultando parcelas no Sienge… " + feitos + " de " + porTitulo.size;
+          if (status) status.textContent = "Consultando as parcelas no Sienge…";
           await new Promise((r) => setTimeout(r, 280));
         }
       };
@@ -431,6 +445,7 @@ const GerarPagamentoApp = {
       this.pintarConferencia("gp-conf-recusa", recusas, "Nenhum título a vencer saiu de lote por recusa do banco.");
       if (status) status.textContent = abertos.length + " sem processamento · " + recusas.length + " fora do lote por recusa."
         + (semLeitura ? " · " + semLeitura + " parcela(s) não consultada(s) no Sienge." : "");
+      if (!abertos.length && !recusas.length && !semLeitura) this.marcarConferenciaVista(hoje);
     } catch (e) {
       if (status) status.textContent = (e && e.message) ? e.message : "Não consegui atualizar a situação dos lotes.";
     }

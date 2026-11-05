@@ -19,6 +19,12 @@ const UsuariosOnline = {
   error: "",
   unsub: null,
   clock: null,
+  aba: "agora",
+  acessoEmail: "",
+  acessoOpen: false,
+  acessoQ: "",
+  sortAcesso: { campo: "ultimo", dir: 1 },
+  cadastro: null,
 
   esc(s) {
     return String(s == null ? "" : s)
@@ -56,7 +62,7 @@ const UsuariosOnline = {
     return "crm_presence_" + name + ":" + this.presenceId(this.user);
   },
 
-  sinceNow() {
+  sessionStamp() {
     const now = Date.now();
     let since = 0;
     let last = 0;
@@ -64,12 +70,53 @@ const UsuariosOnline = {
       since = Number(localStorage.getItem(this.storeKey("since"))) || 0;
       last = Number(localStorage.getItem(this.storeKey("beat"))) || 0;
     } catch (e) {}
-    if (!since || !last || now - last > this.ONLINE_MS) since = now;
+    let anterior = null;
+    if (!since || !last || now - last > this.ONLINE_MS) {
+      if (since && last) anterior = { since: since, last: last };
+      since = now;
+    }
     try {
       localStorage.setItem(this.storeKey("since"), String(since));
       localStorage.setItem(this.storeKey("beat"), String(now));
     } catch (e) {}
-    return since;
+    return { since: since, anterior: anterior };
+  },
+
+  async sessoesGravadas(ref) {
+    const fb = this.fb();
+    if (!fb || !fb.f.getDoc) return [];
+    try {
+      const snap = await fb.f.getDoc(ref);
+      const data = snap && snap.exists && snap.exists() ? (snap.data() || {}) : {};
+      return Array.isArray(data.sessoes) ? data.sessoes : [];
+    } catch (e) {
+      return null;
+    }
+  },
+
+  montarSessoes(remotas, stamp, encerrar) {
+    const map = new Map();
+    (remotas || []).forEach((s) => {
+      if (s && s.since) map.set(Number(s.since), Object.assign({}, s));
+    });
+    if (stamp.anterior) {
+      const prev = map.get(stamp.anterior.since) || { since: stamp.anterior.since, agent: this.agent() };
+      prev.last = Math.max(Number(prev.last) || 0, stamp.anterior.last);
+      if (!prev.end) prev.end = stamp.anterior.last;
+      map.set(prev.since, prev);
+    }
+    const agora = Date.now();
+    const cur = map.get(stamp.since) || { since: stamp.since, agent: this.agent() };
+    cur.last = agora;
+    if (!cur.agent) cur.agent = this.agent();
+    if (encerrar) {
+      cur.end = agora;
+      cur.saiu = true;
+    } else if (!cur.saiu) {
+      delete cur.end;
+    }
+    map.set(cur.since, cur);
+    return Array.from(map.values()).sort((a, b) => a.since - b.since).slice(-80);
   },
 
   agent() {
@@ -90,26 +137,30 @@ const UsuariosOnline = {
     const fb = this.fb();
     const u = this.user;
     if (!fb || !u || !u.email) return;
-    const since = this.sinceNow();
+    const stamp = this.sessionStamp();
     const pessoa = u.atuando || {};
     const emailPessoa = String(pessoa.email || u.email || "").toLowerCase();
     const conta = String(u._emailConta || u.email || "").toLowerCase();
+    const ref = fb.f.doc(fb.db, this.COLLECTION, this.presenceId(u));
+    const remotas = await this.sessoesGravadas(ref);
+    const payload = {
+      email: emailPessoa,
+      name: pessoa.name || u.name || "",
+      contaEmail: conta,
+      contaName: u._nomeConta || "",
+      profile: u.profile_name || "",
+      since: stamp.since,
+      lastSeen: Date.now(),
+      lastSeenAt: fb.f.serverTimestamp ? fb.f.serverTimestamp() : null,
+      tab: this.tab || "",
+      tabLabel: this.tabLabel(this.tab),
+      agent: this.agent(),
+      lastUse: this.lastUse || Date.now(),
+      online: true
+    };
+    if (remotas) payload.sessoes = this.montarSessoes(remotas, stamp, false);
     try {
-      await fb.f.setDoc(fb.f.doc(fb.db, this.COLLECTION, this.presenceId(u)), {
-        email: emailPessoa,
-        name: pessoa.name || u.name || "",
-        contaEmail: conta,
-        contaName: u._nomeConta || "",
-        profile: u.profile_name || "",
-        since,
-        lastSeen: Date.now(),
-        lastSeenAt: fb.f.serverTimestamp ? fb.f.serverTimestamp() : null,
-        tab: this.tab || "",
-        tabLabel: this.tabLabel(this.tab),
-        agent: this.agent(),
-        lastUse: this.lastUse || Date.now(),
-        online: true
-      }, { merge: true });
+      await fb.f.setDoc(ref, payload, { merge: true });
     } catch (e) {
       console.warn("[usuarios-online] sinal não gravado:", e);
     }
@@ -144,16 +195,21 @@ const UsuariosOnline = {
     if (this.timer) clearInterval(this.timer);
     this.timer = null;
     if (!u || !u.email) return;
+    let since = 0;
+    try { since = Number(localStorage.getItem(this.storeKey("since"))) || 0; } catch (e) {}
     try {
       localStorage.removeItem(this.storeKey("since"));
       localStorage.removeItem(this.storeKey("beat"));
     } catch (e) {}
     if (!fb) return;
+    const ref = fb.f.doc(fb.db, this.COLLECTION, this.presenceId(u));
+    const payload = { online: false, logoutAt: Date.now() };
+    if (since) {
+      const remotas = await this.sessoesGravadas(ref);
+      if (remotas) payload.sessoes = this.montarSessoes(remotas, { since: since, anterior: null }, true);
+    }
     try {
-      await fb.f.setDoc(fb.f.doc(fb.db, this.COLLECTION, this.presenceId(u)), {
-        online: false,
-        logoutAt: Date.now()
-      }, { merge: true });
+      await fb.f.setDoc(ref, payload, { merge: true });
     } catch (e) {}
   },
 
@@ -230,7 +286,7 @@ const UsuariosOnline = {
       this.loaded = true;
       this.render();
     });
-    if (!this.clock) this.clock = setInterval(() => this.render(), 30000);
+    if (!this.clock) this.clock = setInterval(() => { if (this.aba !== "acessos") this.render(); }, 30000);
   },
 
   unlisten() {
@@ -242,9 +298,193 @@ const UsuariosOnline = {
     this.clock = null;
   },
 
+  setAba(id) {
+    this.aba = id === "acessos" ? "acessos" : "agora";
+    if (this.aba === "acessos") {
+      this.garantirUsuarios().then(() => this.render());
+      return;
+    }
+    this.render();
+  },
+
+  async garantirUsuarios() {
+    if (Array.isArray(this.cadastro) && this.cadastro.length) return;
+    if (typeof window.syncCrmUsersFromFirebase === "function") {
+      try {
+        const raw = await window.syncCrmUsersFromFirebase();
+        const parsed = typeof raw === "string" ? JSON.parse(raw) : raw;
+        if (Array.isArray(parsed) && parsed.length) {
+          this.cadastro = parsed;
+          return;
+        }
+      } catch (e) {}
+    }
+    try { this.cadastro = JSON.parse(localStorage.getItem("crm_users") || "[]"); } catch (e) { this.cadastro = []; }
+    if (!Array.isArray(this.cadastro)) this.cadastro = [];
+  },
+
+  ativos() {
+    const lista = Array.isArray(this.cadastro) ? this.cadastro : [];
+    return lista.filter((u) => u && u.email && String(u.status || "").toUpperCase() === "ATIVO");
+  },
+
+  nomePerfil(id) {
+    const chave = String(id || "");
+    const profiles = (window.ConfigUsersApp && ConfigUsersApp.profiles) || [];
+    const p = profiles.find((x) => x && (String(x.id) === chave || String(x.name) === chave));
+    return (p && p.name) || chave || "—";
+  },
+
+  emailLinha(row) {
+    return String((row && (row.email || row.id)) || "").split("__")[0].trim().toLowerCase();
+  },
+
+  sessoesDe(email) {
+    const alvo = String(email || "").toLowerCase();
+    const lista = [];
+    this.rows.forEach((row) => {
+      if (this.emailLinha(row) !== alvo) return;
+      const gravadas = Array.isArray(row.sessoes) ? row.sessoes : [];
+      gravadas.forEach((s) => {
+        if (!s || !s.since) return;
+        lista.push({
+          since: Number(s.since) || 0,
+          last: Number(s.last) || Number(s.end) || Number(s.since) || 0,
+          end: s.end ? Number(s.end) : 0,
+          saiu: !!s.saiu,
+          agent: s.agent || row.agent || ""
+        });
+      });
+      if (!gravadas.length && (row.since || row.lastSeen)) {
+        lista.push({
+          since: Number(row.since) || Number(row.lastSeen) || 0,
+          last: Number(row.lastSeen) || Number(row.since) || 0,
+          end: row.online === false ? (Number(row.logoutAt) || Number(row.lastSeen) || 0) : 0,
+          saiu: row.online === false && !!row.logoutAt,
+          agent: row.agent || "",
+          legado: true
+        });
+      }
+    });
+    const vistas = new Set();
+    return lista.filter((s) => {
+      if (!s.since || vistas.has(s.since)) return false;
+      vistas.add(s.since);
+      return true;
+    }).sort((a, b) => b.since - a.since);
+  },
+
+  linhasAcesso(now) {
+    const porEmail = new Map();
+    this.rows.forEach((row) => {
+      const email = this.emailLinha(row);
+      if (!email) return;
+      const atual = porEmail.get(email) || { ultimo: 0, online: false };
+      const visto = this.seenAt(row);
+      if (visto > atual.ultimo) atual.ultimo = visto;
+      if (this.isOnline(row, now)) atual.online = true;
+      porEmail.set(email, atual);
+    });
+    return this.ativos().map((u) => {
+      const email = String(u.email || "").trim().toLowerCase();
+      const sinal = porEmail.get(email) || { ultimo: 0, online: false };
+      const sessoes = this.sessoesDe(email);
+      const ultimoSessao = sessoes.reduce((m, s) => Math.max(m, s.last || s.since || 0), 0);
+      return {
+        email: email,
+        nome: String(u.name || email).trim(),
+        perfil: this.nomePerfil(u.profile_name),
+        ultimo: Math.max(sinal.ultimo || 0, ultimoSessao || 0),
+        online: !!sinal.online,
+        sessoes: sessoes
+      };
+    });
+  },
+
+  ordenar(campo) {
+    if (this.sortAcesso.campo === campo) this.sortAcesso.dir = -this.sortAcesso.dir;
+    else this.sortAcesso = { campo: campo, dir: 1 };
+    this.render();
+  },
+
+  escolher(email) {
+    const id = String(email || "").toLowerCase();
+    this.acessoEmail = this.acessoEmail === id ? "" : id;
+    this.acessoOpen = false;
+    this.render();
+  },
+
+  filtroAcessoOpts() {
+    const items = this.linhasAcesso(Date.now())
+      .sort((a, b) => a.nome.localeCompare(b.nome, "pt", { sensitivity: "base" }))
+      .map((u) => ({ id: u.email, label: String(u.nome || u.email).toUpperCase() }));
+    return {
+      id: "uo-acesso-user",
+      label: "Usuário",
+      items: items,
+      selectedIds: this.acessoEmail ? [this.acessoEmail] : [],
+      open: this.acessoOpen,
+      query: this.acessoQ,
+      single: true,
+      emptyMeansAll: false,
+      emptyLabel: "Selecione",
+      keepOrder: true,
+      extraClass: "ml-emp-filter--corte",
+      nouns: { singular: "usuário", plural: "usuários", none: "Nenhum usuário", noMatch: "Nenhum usuário com esse nome." }
+    };
+  },
+
+  bindFiltroAcesso() {
+    if (!window.MlEmpresaFilter) return;
+    const self = this;
+    MlEmpresaFilter.bind("uo-acesso-user", {
+      toggleOpen() {
+        self.acessoOpen = !self.acessoOpen;
+        self.render();
+      },
+      close() {
+        self.acessoOpen = false;
+        self.render();
+      },
+      setQuery(q) {
+        self.acessoQ = q;
+        const list = document.getElementById("uo-acesso-user-list");
+        if (!list) return;
+        list.innerHTML = MlEmpresaFilter.listHtml(self.filtroAcessoOpts());
+      },
+      toggleId(itemId, on) {
+        self.acessoEmail = on ? String(itemId || "").toLowerCase() : "";
+        self.acessoOpen = true;
+        self.render();
+      }
+    });
+  },
+
+  abasHtml() {
+    const tabs = [
+      { id: "agora", label: "Agora", icon: "users" },
+      { id: "acessos", label: "Acessos", icon: "history" }
+    ];
+    return `<div class="ml-tabs" role="tablist" style="margin-bottom:16px;">
+      ${tabs.map((t) => `
+        <button type="button" role="tab" aria-selected="${this.aba === t.id}"
+          class="ml-tab ${this.aba === t.id ? "is-active" : ""}"
+          onclick="UsuariosOnline.setAba('${t.id}')"><i data-lucide="${t.icon}"></i> ${t.label}</button>
+      `).join("")}
+    </div>`;
+  },
+
   render() {
     const root = document.getElementById("usuarios-online-root");
     if (!root) return;
+    if (this.aba === "acessos") {
+      this.renderAcessos(root);
+      return;
+    }
+    this.renderAgora(root);
+  },
+
+  renderAgora(root) {
     const now = Date.now();
     const me = this.presenceId(this.user);
     const online = this.rows.filter((r) => this.isOnline(r, now))
@@ -301,6 +541,7 @@ const UsuariosOnline = {
 
     root.innerHTML = `
       <div style="padding:16px 18px 28px;">
+        ${this.abasHtml()}
         <p style="margin:0 0 14px;font-size:0.82rem;color:#64748b;max-width:760px;">
           Quem está com a página aberta entra na lista. Sem aviso do navegador por 3 minutos, a pessoa sai.
           Último uso é o último clique, tecla ou rolagem. Sem isso por 5 minutos, a linha fica como sem uso.
@@ -339,6 +580,111 @@ const UsuariosOnline = {
           </div>
         </div>
       </div>`;
+    try { if (window.lucide) lucide.createIcons(); } catch (e) {}
+  },
+
+  renderAcessos(root) {
+    const now = Date.now();
+    const trinta = 30 * 86400000;
+    const linhas = this.linhasAcesso(now);
+    const dir = this.sortAcesso.dir;
+    const campo = this.sortAcesso.campo;
+    const ordenadas = linhas.slice().sort((a, b) => {
+      let va;
+      let vb;
+      if (campo === "nome") { va = a.nome; vb = b.nome; }
+      else if (campo === "perfil") { va = a.perfil; vb = b.perfil; }
+      else if (campo === "sessoes") { va = a.sessoes.length; vb = b.sessoes.length; }
+      else { va = a.ultimo || 0; vb = b.ultimo || 0; }
+      if (typeof va === "string") return va.localeCompare(vb, "pt", { sensitivity: "base" }) * dir;
+      return (va - vb) * dir;
+    });
+    const visiveis = this.acessoEmail ? ordenadas.filter((u) => u.email === this.acessoEmail) : ordenadas;
+    const nunca = linhas.filter((u) => !u.ultimo).length;
+    const parados = linhas.filter((u) => u.ultimo && now - u.ultimo > trinta).length;
+    const th = (campoId, label, right) => `<th onclick="UsuariosOnline.ordenar('${campoId}')" style="cursor:pointer;user-select:none;padding:9px 12px;text-align:${right ? "right" : "left"};font-weight:700;white-space:nowrap;color:#105436;">${label} <i data-lucide="chevrons-up-down" style="width:11px;vertical-align:middle;"></i></th>`;
+    const filtro = window.MlEmpresaFilter ? MlEmpresaFilter.html(this.filtroAcessoOpts()) : "";
+    const card = (label, value, color) => `
+      <div class="crm-card" style="padding:14px 16px;">
+        <div style="font-size:0.72rem;color:#64748b;font-weight:700;text-transform:uppercase;">${label}</div>
+        <div style="font-size:1.6rem;font-weight:800;color:${color};">${value}</div>
+      </div>`;
+    const situacao = (u) => {
+      if (u.online) return { texto: "Online agora", cor: "#105436" };
+      if (!u.ultimo) return { texto: "Nunca acessou", cor: "#b45309" };
+      return { texto: this.ago(now - u.ultimo), cor: now - u.ultimo > trinta ? "#b45309" : "#334155" };
+    };
+    const rows = visiveis.map((u) => {
+      const sit = situacao(u);
+      const sel = u.email === this.acessoEmail;
+      return `<tr data-email="${this.esc(u.email)}" onclick="UsuariosOnline.escolher(this.getAttribute('data-email'))" style="border-top:1px solid #eef2f6;cursor:pointer;background:${sel ? "#f0fdf4" : "transparent"};">
+        <td style="padding:9px 12px;">
+          <span style="display:block;font-weight:800;color:#0f172a;">${this.esc(u.nome)}</span>
+          <span style="display:block;font-size:0.72rem;color:#64748b;">${this.esc(u.email)}</span>
+        </td>
+        <td style="padding:9px 12px;color:#334155;">${this.esc(u.perfil)}</td>
+        <td style="padding:9px 12px;text-align:right;white-space:nowrap;color:#334155;">${u.ultimo ? this.when(u.ultimo) : "—"}</td>
+        <td style="padding:9px 12px;text-align:right;font-weight:700;color:#0f172a;">${u.sessoes.length}</td>
+        <td style="padding:9px 12px;text-align:right;white-space:nowrap;font-weight:800;color:${sit.cor};">${this.esc(sit.texto)}</td>
+      </tr>`;
+    }).join("");
+    const escolhido = linhas.find((u) => u.email === this.acessoEmail);
+    const sessoes = escolhido ? escolhido.sessoes : [];
+    const sessRows = sessoes.map((s) => {
+      const fim = s.end || 0;
+      const aberta = !fim && escolhido.online && (now - (s.last || s.since)) <= this.ONLINE_MS;
+      const ate = fim || s.last || s.since;
+      return `<tr style="border-top:1px solid #eef2f6;">
+        <td style="padding:9px 12px;white-space:nowrap;">${this.when(s.since)}</td>
+        <td style="padding:9px 12px;white-space:nowrap;">${this.when(s.last || s.since)}</td>
+        <td style="padding:9px 12px;white-space:nowrap;color:${aberta ? "#105436" : "#334155"};font-weight:${aberta ? 800 : 500};">${aberta ? "Ainda na tela" : (s.saiu ? "Saiu, " + this.when(fim) : this.when(ate))}</td>
+        <td style="padding:9px 12px;text-align:right;white-space:nowrap;">${this.duration((aberta ? now : ate) - s.since)}</td>
+        <td style="padding:9px 12px;color:#64748b;white-space:nowrap;">${this.esc(s.agent || "—")}</td>
+      </tr>`;
+    }).join("");
+
+    root.innerHTML = `
+      <div style="padding:16px 18px 28px;">
+        ${this.abasHtml()}
+        <p style="margin:0 0 14px;font-size:0.82rem;color:#64748b;max-width:760px;">
+          Cadastros ativos e o momento em que cada pessoa entrou no Integra. Quem nunca abriu o sistema desde que o sinal passou a ser gravado aparece como nunca acessou.
+          Cada entrada nova fica na lista da pessoa. O que já existia antes desta aba aparece como o último sinal.
+        </p>
+        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:10px;margin-bottom:14px;">
+          ${card("Com acesso", linhas.length, "#0f172a")}
+          ${card("Nunca acessaram", nunca, "#b45309")}
+          ${card("Sem entrar há 30 dias", parados, "#64748b")}
+        </div>
+        <div style="max-width:360px;margin-bottom:14px;">${filtro}</div>
+        <div class="crm-card" style="padding:0;overflow:hidden;margin-bottom:12px;">
+          <div style="padding:10px 14px;font-weight:800;color:#105436;border-bottom:1px solid #e2e8f0;">Quem tem acesso</div>
+          <div style="overflow:auto;">
+            <table style="width:100%;border-collapse:collapse;font-size:0.82rem;">
+              <thead><tr style="background:#f8fafc;">
+                ${th("nome", "Usuário")}${th("perfil", "Perfil")}${th("ultimo", "Último acesso", true)}${th("sessoes", "Entradas", true)}<th style="padding:9px 12px;text-align:right;font-weight:700;white-space:nowrap;color:#64748b;">Situação</th>
+              </tr></thead>
+              <tbody>${rows || `<tr><td colspan="5" style="padding:18px;color:#94a3b8;text-align:center;">${this.cadastro ? "Nenhum usuário ativo." : "Carregando…"}</td></tr>`}</tbody>
+            </table>
+          </div>
+        </div>
+        ${escolhido ? `
+        <div class="crm-card" style="padding:0;overflow:hidden;">
+          <div style="padding:10px 14px;font-weight:800;color:#105436;border-bottom:1px solid #e2e8f0;">Entradas de ${this.esc(escolhido.nome)}</div>
+          <div style="overflow:auto;">
+            <table style="width:100%;border-collapse:collapse;font-size:0.82rem;">
+              <thead><tr style="background:#f8fafc;color:#64748b;">
+                <th style="padding:9px 12px;text-align:left;">Entrou</th>
+                <th style="padding:9px 12px;text-align:left;">Último sinal</th>
+                <th style="padding:9px 12px;text-align:left;">Encerrou</th>
+                <th style="padding:9px 12px;text-align:right;">Tempo na tela</th>
+                <th style="padding:9px 12px;text-align:left;">Navegador</th>
+              </tr></thead>
+              <tbody>${sessRows || `<tr><td colspan="5" style="padding:18px;color:#94a3b8;text-align:center;">Nenhuma entrada gravada.</td></tr>`}</tbody>
+            </table>
+          </div>
+        </div>` : ""}
+      </div>`;
+    this.bindFiltroAcesso();
     try { if (window.lucide) lucide.createIcons(); } catch (e) {}
   },
 
