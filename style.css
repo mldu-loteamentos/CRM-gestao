@@ -1513,6 +1513,35 @@ button.btn-fechar:hover,
   transform: translateY(0);
 }
 
+#map-modal-overlay.is-kmz-cheio {
+  align-items: stretch;
+  justify-content: stretch;
+  padding: 0;
+}
+#map-modal-overlay.is-kmz-cheio > .modal-box {
+  width: 100vw !important;
+  max-width: none !important;
+  height: 100vh;
+  max-height: 100vh;
+  margin: 0;
+  border-radius: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  transform: none;
+}
+#map-modal-overlay.is-kmz-cheio > .modal-box > div {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+#map-modal-overlay.is-kmz-cheio #map-iframe-container {
+  flex: 1 1 auto;
+  height: auto !important;
+  min-height: 0;
+}
+
 .modal-header {
   display: flex;
   justify-content: space-between;

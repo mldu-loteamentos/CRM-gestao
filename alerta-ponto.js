@@ -52,7 +52,7 @@ const AlertaPonto = {
   },
 
   ehIsrael() {
-    const u = this.usuario();
+    const u = this.contaReal();
     return !!(u && String(u.email || "").toLowerCase() === this.EMAIL);
   },
 
@@ -95,19 +95,51 @@ const AlertaPonto = {
     return { ini: ini, fim: fim };
   },
 
+  _visto: {},
+
+  contaReal() {
+    const u = window.AppState && window.AppState.currentUser;
+    if (u && u.email) return u;
+    try { return JSON.parse(localStorage.getItem("crm_logged_user") || "null"); } catch (e) { return null; }
+  },
+
   chave(tipo, dia) {
-    const u = this.usuario() || {};
-    const quem = String(u.email || this.EMAIL).toLowerCase();
-    return "crm_ponto_" + tipo + "_" + quem + "_" + dia;
+    return "crm_ponto_" + tipo + "_" + this.EMAIL + "_" + dia;
   },
 
   jaCiente(tipo, dia) {
-    try { return localStorage.getItem(this.chave(tipo, dia)) === "ciente"; } catch (e) { return false; }
+    if (!dia) return false;
+    if (this._visto[tipo + ":" + dia]) return true;
+    const k = this.chave(tipo, dia);
+    try { if (localStorage.getItem(k) === "ciente") return true; } catch (e) {}
+    try { if (sessionStorage.getItem(k) === "ciente") return true; } catch (e) {}
+    return false;
   },
 
   marcar(tipo, dia) {
     if (!dia) return;
-    try { localStorage.setItem(this.chave(tipo, dia), "ciente"); } catch (e) {}
+    this._visto[tipo + ":" + dia] = true;
+    const k = this.chave(tipo, dia);
+    const gravar = (store) => {
+      try {
+        store.setItem(k, "ciente");
+        return store.getItem(k) === "ciente";
+      } catch (e) {
+        return false;
+      }
+    };
+    if (!gravar(localStorage)) {
+      if (typeof window.ensureCrmStorageRoom === "function") {
+        try { window.ensureCrmStorageRoom(); } catch (e) {}
+      }
+      const native = window._nativeLocalStorageSetItem;
+      if (typeof native === "function") {
+        try { native.call(localStorage, k, "ciente"); } catch (e) {}
+      } else {
+        gravar(localStorage);
+      }
+    }
+    gravar(sessionStorage);
   },
 
   avisosDe(hoje) {

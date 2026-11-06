@@ -3841,6 +3841,7 @@ function switchTab(tabId, titleOverride, showLoader = false) {
     "followup-cnd": "Follow-up CND",
     "kmz": "Upload de Mapeamento (KMZ)",
     "upload-kmz": "Upload de KMZ",
+    "imagem-satelite": "Imagem de Satélite",
     "upload-mapa": "Upload de Projeto Urbanístico",
     "construcao-fiscal": "Calcular impostos",
     "fiscal-inserir-nota": "Validar nota",
@@ -4070,7 +4071,7 @@ function switchTab(tabId, titleOverride, showLoader = false) {
     if (window.CentralEmailApp && typeof CentralEmailApp.abrir === "function") CentralEmailApp.abrir();
   } else if (tabId === "doc-padrao") {
     loadDocPadraoTemplates();
-  } else if (tabId === "upload-kmz") {
+  } else if (tabId === "upload-kmz" || tabId === "imagem-satelite") {
     loadKMZList();
   } else if (tabId === "upload-mapa") {
     if (window.mapaPlantaAbrir) window.mapaPlantaAbrir();
@@ -4143,7 +4144,7 @@ function switchTab(tabId, titleOverride, showLoader = false) {
   } else if (tabId === "doc-padrao") {
     if (typeof loadDocPadraoTemplates === "function") loadDocPadraoTemplates();
     window.crmCriarIcones(activePane || document.getElementById("tab-doc-padrao"));
-  } else if (tabId === "upload-kmz") {
+  } else if (tabId === "upload-kmz" || tabId === "imagem-satelite") {
     loadKMZList();
   } else if (tabId === "construcao-marketing" || tabId === "marketing-eventos") {
     if (typeof MarketingApp !== "undefined") MarketingApp.init();
@@ -18018,6 +18019,10 @@ window.viewCustomerCard = viewCustomerCard;
 function goBackToDashboard() {
   try { sessionStorage.removeItem("currentSubView"); } catch (e) {}
   if (typeof window.leaveDistratoSimulation === "function") window.leaveDistratoSimulation();
+  if (window._kmzMapaReturn && typeof window.voltarMapaKmz === "function") {
+    window.voltarMapaKmz();
+    return;
+  }
   if (window._homeInsightReturn) {
     window._homeInsightReturn = false;
     document.getElementById("view-customer-details").style.display = "none";
@@ -45609,6 +45614,21 @@ window.desenharQuadrasKmz = async function(map, empId) {
   }
 };
 
+window.kmzPontosEnquadramento = function(pontos) {
+  const pts = (pontos || []).filter((p) => p && Number.isFinite(p[0]) && Number.isFinite(p[1]));
+  if (pts.length < 8) return pts;
+  const faixa = (vals) => {
+    const s = vals.slice().sort((a, b) => a - b);
+    const i0 = Math.max(0, Math.floor((s.length - 1) * 0.03));
+    const i1 = Math.min(s.length - 1, Math.ceil((s.length - 1) * 0.97));
+    return [s[i0], s[i1]];
+  };
+  const lat = faixa(pts.map((p) => p[0]));
+  const lng = faixa(pts.map((p) => p[1]));
+  const dentro = pts.filter((p) => p[0] >= lat[0] && p[0] <= lat[1] && p[1] >= lng[0] && p[1] <= lng[1]);
+  return dentro.length >= 4 ? dentro : pts;
+};
+
 window.kmzEtiquetaCurta = function(nome, empId) {
   let s = String(nome || "").trim();
   const id = String(empId || "").trim();
@@ -45866,6 +45886,26 @@ window.baixarKmlMapa = function(nome, itens, foco) {
   setTimeout(() => URL.revokeObjectURL(url), 4000);
 };
 
+window.voltarMapaKmz = function() {
+  window._kmzMapaReturn = null;
+  const ficha = document.getElementById("view-customer-details");
+  if (ficha) ficha.style.display = "none";
+  const reneg = document.getElementById("view-renegotiation");
+  if (reneg) reneg.style.display = "none";
+  const distrato = document.getElementById("view-distrato");
+  if (distrato) distrato.style.display = "none";
+  const textoVolta = document.getElementById("text-back-to-list");
+  if (textoVolta) textoVolta.textContent = "Voltar para Lista";
+  const modal = document.getElementById("map-modal-overlay");
+  if (modal) {
+    modal.classList.add("is-kmz-cheio");
+    modal.style.display = "";
+    modal.classList.add("active");
+  }
+  const map = window.leafletMapInstance;
+  if (map) setTimeout(() => map.invalidateSize(), 60);
+};
+
 window.abrirMapaKmz = async function(empId) {
   const id = String(empId || "");
   const modal = document.getElementById("map-modal-overlay");
@@ -45875,8 +45915,19 @@ window.abrirMapaKmz = async function(empId) {
   const nome = kmzNomeCentro(id);
   if (title) title.textContent = nome ? (id + " - " + nome) : id;
   box.innerHTML = '<div id="leaflet-map-div" style="width:100%;height:100%;"></div>';
+  modal.classList.add("is-kmz-cheio");
   modal.style.display = "";
   modal.classList.add("active");
+  window._kmzMapaReturn = { empId: id };
+  const fecharMapa = modal.querySelector(".btn-fechar");
+  if (fecharMapa) {
+    fecharMapa.onclick = function() {
+      window._kmzMapaReturn = null;
+      modal.classList.remove("active");
+      modal.classList.remove("is-kmz-cheio");
+      modal.style.display = "none";
+    };
+  }
 
   const btnEarth = document.getElementById("btn-download-kml");
   if (btnEarth) {
@@ -45934,10 +45985,10 @@ window.abrirMapaKmz = async function(empId) {
       const style = document.createElement("style");
       style.id = "kmz-lote-style";
       style.textContent = ""
-        + ".kmz-lote-icon{background:transparent;border:none;}"
-        + ".kmz-lote{display:flex;align-items:center;gap:2px;transform:translate(-5px,-5px);cursor:pointer;}"
+        + ".kmz-lote-icon{background:transparent !important;border:none !important;overflow:visible !important;width:auto !important;height:auto !important;}"
+        + ".kmz-lote{display:flex;align-items:center;gap:3px;cursor:pointer;width:max-content;}"
         + ".kmz-lote-bola{width:10px;height:10px;border-radius:50%;box-shadow:0 0 0 1px #fff,0 0 0 2px rgba(15,23,42,.35);flex:none;}"
-        + ".kmz-lote-nome{font-size:10px;font-weight:800;line-height:14px;color:#0f172a;background:rgba(255,255,255,.94);border-radius:4px;padding:0 3px;white-space:nowrap;}"
+        + ".kmz-lote-nome{font-size:11px;font-weight:800;line-height:14px;color:#0f172a;background:rgba(255,255,255,.94);border-radius:4px;padding:0 3px;white-space:nowrap;}"
         + ".kmz-lote.is-quitado .kmz-lote-bola{background:#94a3b8;}"
         + ".kmz-lote.is-adimplente .kmz-lote-bola{background:#16a34a;}"
         + ".kmz-lote.is-inadimplente .kmz-lote-bola{background:#dc2626;}"
@@ -45959,31 +46010,36 @@ window.abrirMapaKmz = async function(empId) {
       document.head.appendChild(style);
     }
     const marcas = [];
+    const pontosLote = [];
     (data.placemarks || []).forEach((p) => {
-      const pts = guardar(p && (p.coords || p.coordinates));
+      const bruto = p && (p.coords || p.coordinates);
+      const pts = (window.parseKmzCoordPoints ? window.parseKmzCoordPoints(bruto) : [])
+        .map((pt) => [pt.lat, pt.lng])
+        .filter((pt) => Number.isFinite(pt[0]) && Number.isFinite(pt[1]));
       if (pts.length !== 1) return;
+      pontosLote.push(pts[0]);
       const nomeLote = String((p && (p.name || p.lot_name)) || "").trim();
       const etiqueta = window.kmzEtiquetaCurta(nomeLote, id) || nomeLote || "Lote";
+      const escNome = String(etiqueta).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
       const icon = L.divIcon({
         className: "kmz-lote-icon",
-        html: '<div class="kmz-lote is-neutro"><i class="kmz-lote-bola"></i><b class="kmz-lote-nome"></b></div>',
-        iconSize: [0, 0],
-        iconAnchor: [0, 0]
+        html: '<div class="kmz-lote is-neutro"><i class="kmz-lote-bola"></i><b class="kmz-lote-nome">' + escNome + '</b></div>',
+        iconSize: [110, 18],
+        iconAnchor: [5, 9]
       });
-      const mark = L.marker(pts[0], { icon: icon, interactive: true, keyboard: false }).addTo(map);
-      const caixa = mark.getElement && mark.getElement();
-      const nomeEl = caixa && caixa.querySelector(".kmz-lote-nome");
-      if (nomeEl) nomeEl.textContent = etiqueta;
-      const escNome = String(etiqueta).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-      mark.bindTooltip('<div class="kmz-tip"><strong>' + escNome + '</strong><p>Lendo o contrato…</p></div>', { direction: "top", opacity: 1, className: "kmz-lote-tip", offset: [10, -6] });
+      const mark = L.marker(pts[0], { icon: icon, interactive: true, keyboard: false, zIndexOffset: 400 }).addTo(map);
+      mark.bindTooltip('<div class="kmz-tip"><strong>' + escNome + '</strong><p>Lendo o contrato…</p></div>', { direction: "top", opacity: 1, className: "kmz-lote-tip", offset: [8, -8] });
       mark.on("click", () => {
         const info = mark._kmzInfo;
         if (!info || !info.customerId || typeof window.viewCustomerCard !== "function") return;
+        window._kmzMapaReturn = { empId: id };
         const modalMapa = document.getElementById("map-modal-overlay");
         if (modalMapa) {
           modalMapa.classList.remove("active");
           modalMapa.style.display = "none";
         }
+        const textoVolta = document.getElementById("text-back-to-list");
+        if (textoVolta) textoVolta.textContent = "Voltar para o mapa";
         window.viewCustomerCard(info.customerId, info.saleId);
       });
       marcas.push({ mark: mark, nome: nomeLote, etiqueta: etiqueta });
@@ -46026,9 +46082,15 @@ window.abrirMapaKmz = async function(empId) {
       if (status) status.textContent = "Não foi possível ler os contratos agora.";
     });
     (data.quadras || []).forEach((q) => guardar(q && (q.coords || q.coordinates)));
-    if (limites.length) map.fitBounds(limites, { padding: [28, 28], maxZoom: 18 });
-    else map.setView([-14.2, -51.9], 4);
-    setTimeout(() => map.invalidateSize(), 180);
+    const enquadrar = () => {
+      const foco = window.kmzPontosEnquadramento(pontosLote);
+      if (foco.length) map.fitBounds(foco, { padding: [48, 48], maxZoom: 19 });
+      else if (limites.length) map.fitBounds(limites, { padding: [28, 28], maxZoom: 18 });
+      else map.setView([-14.2, -51.9], 4);
+    };
+    enquadrar();
+    setTimeout(() => { map.invalidateSize(); enquadrar(); }, 220);
+    setTimeout(() => { map.invalidateSize(); enquadrar(); }, 520);
   }, 60);
 };
 
@@ -46048,7 +46110,12 @@ function kmzNomeCentro(id) {
 }
 
 function kmzPintarLista() {
-  const body = document.getElementById("kmz-list-body");
+  kmzPintarTabela("kmz-list-body", true);
+  kmzPintarTabela("satelite-list-body", false);
+}
+
+function kmzPintarTabela(bodyId, podeExcluir) {
+  const body = document.getElementById(bodyId);
   if (!body) return;
   const esc = (s) => String(s || "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
   const ord = window._kmzListaOrdem || { campo: "id", dir: 1 };
@@ -46062,6 +46129,9 @@ function kmzPintarLista() {
   }
   body.innerHTML = rows.map((item) => {
     const nome = item.nome || "—";
+    const excluir = podeExcluir
+      ? `<button type="button" class="tvig-ico is-danger" title="Excluir" onclick="deleteKMZ('${esc(item.id)}')"><i data-lucide="trash-2" style="width: 15px; height: 15px;"></i></button>`
+      : "";
     return `<tr>
       <td><strong>${esc(item.id)}</strong></td>
       <td class="cc-nome" title="${esc(item.nome)}">${esc(nome)}</td>
@@ -46071,9 +46141,7 @@ function kmzPintarLista() {
         <button type="button" class="tvig-ico" title="Abrir mapa" onclick="abrirMapaKmz('${esc(item.id)}')">
           <i data-lucide="eye" style="width: 15px; height: 15px;"></i>
         </button>
-        <button type="button" class="tvig-ico is-danger" title="Excluir" onclick="deleteKMZ('${esc(item.id)}')">
-          <i data-lucide="trash-2" style="width: 15px; height: 15px;"></i>
-        </button>
+        ${excluir}
       </td>
     </tr>`;
   }).join("");
@@ -46092,9 +46160,11 @@ window.kmzOrdenarLista = function(campo) {
 };
 
 async function loadKMZList() {
-  const body = document.getElementById("kmz-list-body");
-  if (!body) return;
-  body.innerHTML = '<tr><td colspan="5" class="is-center">Carregando centros de custo...</td></tr>';
+  const corpos = ["kmz-list-body", "satelite-list-body"].map((id) => document.getElementById(id)).filter(Boolean);
+  if (!corpos.length) return;
+  corpos.forEach((body) => {
+    body.innerHTML = '<tr><td colspan="5" class="is-center">Carregando centros de custo...</td></tr>';
+  });
 
   try {
     if (window.mapaPlantaCarregarCentros) {
@@ -46118,7 +46188,9 @@ async function loadKMZList() {
     kmzPintarLista();
   } catch (error) {
     console.error("Erro ao carregar lista de KMZ:", error);
-    body.innerHTML = '<tr><td colspan="5" class="is-center" style="color:#b91c1c;">Erro ao carregar os centros de custo.</td></tr>';
+    corpos.forEach((body) => {
+      body.innerHTML = '<tr><td colspan="5" class="is-center" style="color:#b91c1c;">Erro ao carregar os centros de custo.</td></tr>';
+    });
   }
 }
 
@@ -46519,8 +46591,18 @@ function abrirLoteGoogleEarth(lotName, coordinatesStr, empId = null) {
     if (svBox) svBox.style.display = 'none';
 
     // Exibir o modal
+    document.getElementById('map-modal-overlay').classList.remove('is-kmz-cheio');
     document.getElementById('map-modal-overlay').style.display = '';
     document.getElementById('map-modal-overlay').classList.add('active');
+    const fecharLote = document.querySelector('#map-modal-overlay .btn-fechar');
+    if (fecharLote) {
+      fecharLote.onclick = function() {
+        const modalMapa = document.getElementById('map-modal-overlay');
+        if (!modalMapa) return;
+        modalMapa.classList.remove('active');
+        modalMapa.style.display = 'none';
+      };
+    }
   } catch (e) {
     console.error("Erro ao abrir lote:", e);
     alert("Erro interno ao abrir o mapa: " + e.message);
@@ -46560,8 +46642,18 @@ function abrirEnderecoGoogleMaps(addressString, typeLabel, customerName) {
     }
 
     // Exibir o modal
+    document.getElementById('map-modal-overlay').classList.remove('is-kmz-cheio');
     document.getElementById('map-modal-overlay').style.display = '';
     document.getElementById('map-modal-overlay').classList.add('active');
+    const fecharLote = document.querySelector('#map-modal-overlay .btn-fechar');
+    if (fecharLote) {
+      fecharLote.onclick = function() {
+        const modalMapa = document.getElementById('map-modal-overlay');
+        if (!modalMapa) return;
+        modalMapa.classList.remove('active');
+        modalMapa.style.display = 'none';
+      };
+    }
   } catch (e) {
     console.error("Erro ao abrir endereço:", e);
   }
