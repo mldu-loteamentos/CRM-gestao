@@ -15133,10 +15133,12 @@ function formatCpfCnpj(val) {
       </div>
     `;
     const assistenteBtnHtml = `
-      <div style="margin-bottom: 20px; display: flex; justify-content: flex-end;">
-        <button type="button" class="btn btn-primary" onclick="window.openAnexosClienteModal(${customerId})">
-          <i data-lucide="paperclip" style="width: 16px; margin-right: 6px;"></i> Buscar mais anexos
-        </button>
+      <div class="cc-toolbar">
+        <div class="cc-toolbar-actions">
+          <button type="button" class="btn btn-primary cc-atualizar" onclick="window.abrirAnexosParaJuridico(${customerId})">
+            <i data-lucide="paperclip" style="width: 16px; height: 16px;"></i> Buscar mais anexos
+          </button>
+        </div>
       </div>
     `;
 
@@ -15175,7 +15177,7 @@ function formatCpfCnpj(val) {
            try {
              const btn = event.currentTarget;
              const oldHtml = btn.innerHTML;
-             btn.innerHTML = `<div class="loading-spinner" style="width:14px; height:14px; border:2px solid rgba(16,84,54,0.15); border-top-color:var(--color-primary); border-radius:50%; animation:spin 0.8s linear infinite;"></div> Baixando...`;
+             btn.innerHTML = `<div class="loading-spinner" style="width:14px; height:14px; border:2px solid rgba(16,84,54,0.15); border-top-color:var(--color-primary); border-radius:50%; animation:spin 0.8s linear infinite;"></div>`;
              
              // Ensure url starts with proxy if it's absolute sienge API
              let fetchUrl = url;
@@ -15203,33 +15205,46 @@ function formatCpfCnpj(val) {
            } catch(e) {
              console.error('Erro no download', e);
              alert('Não foi possível baixar o documento. Verifique as credenciais da API.');
-             if(event && event.currentTarget) event.currentTarget.innerHTML = `<i data-lucide="download" style="width: 14px;"></i> Baixar`;
+             if(event && event.currentTarget) {
+               event.currentTarget.innerHTML = `<i data-lucide="paperclip" style="width:15px;height:15px;"></i>`;
+               if (window.lucide) lucide.createIcons();
+             }
            }
          };
 
-         let attRows = attRes.results.map(att => {
-           let dlLink = '#';
+         const escHtml = (s) => String(s == null ? "" : s)
+           .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+         let attRows = attRes.results.map((att) => {
+           let dlLink = "#";
            if (att.links && att.links.length > 0) {
-             const lnkObj = att.links.find(l => l.rel === 'contentDownloadLink');
+             const lnkObj = att.links.find((l) => l.rel === "contentDownloadLink");
              if (lnkObj) dlLink = lnkObj.href;
            }
-           const sizeKb = (att.size / 1024).toFixed(1) + ' KB';
+           const nome = String(att.fileName || att.name || "Arquivo");
            return `
-             <div style="display: flex; align-items: center; justify-content: space-between; padding: 12px 15px; border: 1px solid var(--color-border); border-radius: 6px; margin-bottom: 8px;">
-               <div style="display: flex; align-items: center; gap: 12px;">
-                 <i data-lucide="file" style="width: 20px; height: 20px; color: var(--color-secondary);"></i>
-                 <div>
-                   <div style="font-weight: 600; color: var(--color-primary); font-size: 0.9rem;">${att.name || 'Arquivo'}</div>
-                   <div style="font-size: 0.8rem; color: var(--color-text-muted);">${att.description || 'Documento do cliente'} • ${sizeKb}</div>
-                 </div>
-               </div>
-               <button type="button" onclick="downloadSiengeDocument('${dlLink}', '${att.name || 'Arquivo'}', event)" class="btn btn-outline btn-sm" style="padding: 6px 12px; font-size: 0.8rem; cursor: pointer;">
-                 <i data-lucide="download" style="width: 14px;"></i> Baixar
-               </button>
-             </div>
+             <tr>
+               <td class="cc-nome" title="${escHtml(nome)}">${escHtml(nome)}</td>
+               <td class="is-center" style="overflow:visible;">
+                 <button type="button" class="tvig-ico" title="Anexo" data-url="${escHtml(dlLink)}" data-name="${escHtml(nome)}" onclick="downloadSiengeDocument(this.getAttribute('data-url'), this.getAttribute('data-name'), event)">
+                   <i data-lucide="paperclip" style="width:15px;height:15px;"></i>
+                 </button>
+               </td>
+             </tr>
            `;
-         }).join('');
-         detAnexosEl.innerHTML = assistenteBtnHtml + attRows;
+         }).join("");
+         detAnexosEl.innerHTML = `<div class="cc-page">
+           ${assistenteBtnHtml}
+           <div class="cc-scroll">
+             <table class="cc-table">
+               <colgroup><col><col style="width:64px"></colgroup>
+               <thead><tr>
+                 <th>Documento</th>
+                 <th class="is-center">Ações</th>
+               </tr></thead>
+               <tbody>${attRows}</tbody>
+             </table>
+           </div>
+         </div>`;
          lucide.createIcons();
        } else {
          detAnexosEl.innerHTML = assistenteBtnHtml + `<span style="color: var(--color-text-muted); font-size: 0.9rem;">Foi encontrado apenas o cadastro do cliente, porém sem anexos.</span>`;
@@ -50882,6 +50897,13 @@ window.repeatJudicialOcc = function(key) {
       noteEl.focus();
   }
   if (typeof window.pintarAvisoSemAlteracao === "function") window.pintarAvisoSemAlteracao();
+};
+
+window.abrirAnexosParaJuridico = function(customerId) {
+  if (typeof window.openAnexosClienteModal === "function") {
+    return window.openAnexosClienteModal(customerId);
+  }
+  alert("Módulo de anexos não está carregado.");
 };
 
 window.openAnexosClienteModal = async function(customerId) {
