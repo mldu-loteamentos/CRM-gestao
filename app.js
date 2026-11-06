@@ -5177,6 +5177,9 @@ async function processSuccessfulLogin(loggedUser) {
       if (window.FinanciamentoApp && typeof window.FinanciamentoApp.agendarAlertaEsteira === "function") {
         window.FinanciamentoApp.agendarAlertaEsteira();
       }
+      if (window.AlertaPonto && typeof window.AlertaPonto.verificar === "function") {
+        window.AlertaPonto.verificar();
+      }
       if (window.DocAssinaturaApp && typeof window.DocAssinaturaApp.avisarPendentes === "function") {
         window.DocAssinaturaApp.avisarPendentes();
       }
@@ -6308,6 +6311,23 @@ window.mergeCrmMouraProfiles = function(localStr, cloudStr) {
   return JSON.stringify(kept);
 };
 
+/* Junta a lista que o envio carregou com a deste navegador e com a nuvem. Um envio antigo não apaga o financiamento incluído depois. */
+window.crmFinanciamentosMesclar = function(payloadRaw, cloudRaw) {
+  let fresco = payloadRaw || "{}";
+  if (typeof window.financiamentosProcAtual === "function") {
+    try { fresco = window.financiamentosProcAtual() || fresco; } catch (e) {}
+  } else {
+    try { fresco = localStorage.getItem("crm_moura_financiamentos_proc") || fresco; } catch (e) {}
+  }
+  if (typeof window.mergeFinanciamentosProc !== "function") {
+    return fresco && fresco !== "{}" ? fresco : (cloudRaw || payloadRaw || "{}");
+  }
+  return window.mergeFinanciamentosProc(
+    window.mergeFinanciamentosProc(payloadRaw || "{}", fresco),
+    cloudRaw || "{}"
+  );
+};
+
 window.commitCrmGlobalConfig = async function(payload) {
   const fc = window.firebaseCollections;
   if (!fc || !fc.runTransaction || !fc.doc || !window.firebaseDb) {
@@ -6404,6 +6424,11 @@ window.commitCrmGlobalConfig = async function(payload) {
         if (merged.length) next[k] = JSON.stringify(merged);
       });
       window._etapasAposCommit = next.crm_moura_judiciais || "";
+    }
+    if (typeof window.crmFinanciamentosMesclar === "function") {
+      const kFin = "crm_moura_financiamentos_proc";
+      const mergedFin = window.crmFinanciamentosMesclar(next[kFin] || "{}", cloud[kFin] || "{}");
+      if (mergedFin && mergedFin !== "{}") next[kFin] = mergedFin;
     }
     tx.set(docRef, next, { merge: true });
   });
@@ -36890,7 +36915,7 @@ window.nexEnsureLookups = function(force) {
   const sales = ((typeof getSiengeApiMode === "function" && getSiengeApiMode() === "simulado")
     ? (window.MOCK_DATA && window.MOCK_DATA.SALES)
     : (AppState && AppState.sales)) || [];
-  const lists = [window.clientList, window.rawClientList, window.zeroPaidList];
+  const lists = [window.clientList, window.rawClientList, window.zeroPaidList, window._subjudiceList];
   const billsA = (AppState && AppState.defaultersBills) || [];
   const billsB = (AppState && AppState.paidBills) || [];
   const paidN = (typeof window.getRecentPaidMap === "function" && window.getRecentPaidMap() && window.getRecentPaidMap().size) || 0;
@@ -36918,6 +36943,22 @@ window.nexEnsureLookups = function(force) {
     });
   });
   const receipts = new Map();
+  const byTitle = new Map();
+  const rememberBill = (b) => {
+    if (!b) return;
+    const name = b.clientName || b.customerName || "";
+    const unit = b.units || b.unitName || b.unityName || "";
+    const ccRaw = Array.isArray(b.costCentersId) ? b.costCentersId[0] : (b.costCenterId || "");
+    const cc = String(ccRaw == null ? "" : ccRaw).split(",")[0].trim();
+    if (!name && !unit && !cc) return;
+    [b.saleId, b.receivableBillId, b.id].forEach((v) => {
+      const s = String(v == null ? "" : v).replace(/^B-/, "").split("-")[0];
+      if (!s || byTitle.has(s)) return;
+      byTitle.set(s, { name: name, unit: unit, cc: cc });
+    });
+  };
+  billsA.forEach(rememberBill);
+  billsB.forEach(rememberBill);
   const pushDates = (key, dates) => {
     if (key == null || key === "") return;
     const k = String(key);
@@ -36948,7 +36989,7 @@ window.nexEnsureLookups = function(force) {
   };
   billsA.forEach(addBill);
   billsB.forEach(addBill);
-  window._nexLook = { sig, byId, byBill, zero, filaByCustomer, receipts, lost: new WeakMap() };
+  window._nexLook = { sig, byId, byBill, zero, filaByCustomer, receipts, byTitle, lost: new WeakMap() };
   return window._nexLook;
 };
 
@@ -38649,7 +38690,23 @@ window.nexFindFilaClient = function(customerId, saleId) {
 window.nexIsPlaceholderName = function(name) {
   const n = String(name || "").trim();
   if (!n) return true;
-  return /^cliente\s*#/i.test(n) || /^cliente sienge/i.test(n) || /^desconhecido$/i.test(n);
+  return /^cliente\s*#/i.test(n) || /^cliente sienge/i.test(n) || /^desconhecido$/i.test(n) || /^sem nome$/i.test(n);
+};
+
+window.nexCustomerFromCache = function(customerId) {
+  const cid = String(customerId || "");
+  const data = window.GlobalCustomerCache && window.GlobalCustomerCache.data;
+  if (!cid || !Array.isArray(data) || !data.length) return null;
+  if (!window._nexCustCache || window._nexCustCache.src !== data) {
+    const byId = new Map();
+    data.forEach((c) => {
+      if (!c) return;
+      const id = String(c.id || c.customerId || "");
+      if (id && !byId.has(id)) byId.set(id, c);
+    });
+    window._nexCustCache = { src: data, byId: byId };
+  }
+  return window._nexCustCache.byId.get(cid) || null;
 };
 
 window.nexResolveCustomerName = function(customerId, saleId, item) {
@@ -38670,6 +38727,12 @@ window.nexResolveCustomerName = function(customerId, saleId, item) {
   if (sale && (sale.customerName || sale.clientName) && !window.nexIsPlaceholderName(sale.customerName || sale.clientName)) {
     return sale.customerName || sale.clientName;
   }
+  const sid = String(saleId || (item && item.titulo) || "").replace(/^B-/, "").split("-")[0];
+  const bill = window._nexLook && window._nexLook.byTitle && window._nexLook.byTitle.get(sid);
+  if (bill && bill.name && !window.nexIsPlaceholderName(bill.name)) return bill.name;
+  const fromCache = window.nexCustomerFromCache(cid);
+  const cacheName = fromCache && (fromCache.name || fromCache.customerName || fromCache.clientName);
+  if (cacheName && !window.nexIsPlaceholderName(cacheName)) return cacheName;
   const det = document.getElementById("det-name");
   if (det && det.textContent && String(AppState.selectedCustomerId) === cid) {
     const t = det.textContent.trim();
@@ -38697,6 +38760,9 @@ window.nexUnitLabelForSale = function(customerId, saleId, item) {
   if (emp) return emp;
   if (ccId) return String(ccId);
   if (unitName) return unitName;
+  const sid = String(saleId || (item && item.titulo) || "").replace(/^B-/, "").split("-")[0];
+  const bill = window._nexLook && window._nexLook.byTitle && window._nexLook.byTitle.get(sid);
+  if (bill && (bill.cc || bill.unit)) return String((bill.cc ? bill.cc + " - " : "") + (bill.unit || "N/D"));
   return "—";
 };
 
@@ -38849,6 +38915,13 @@ window.renderNexFollowup = function() {
   if (!body) return;
   if (typeof window.nexEnsureLookups === "function") window.nexEnsureLookups(true);
   if (typeof window.nexScheduleFollowupPayCheck === "function") window.nexScheduleFollowupPayCheck();
+  const cache = window.GlobalCustomerCache && window.GlobalCustomerCache.data;
+  if ((!cache || !cache.length) && !window._nexCustCacheAsked && typeof window.startCustomerBackgroundSync === "function") {
+    window._nexCustCacheAsked = true;
+    Promise.resolve(window.startCustomerBackgroundSync(false, true)).then(() => {
+      if (typeof window.renderNexFollowup === "function") window.renderNexFollowup();
+    }).catch(() => {});
+  }
   const zeroOnlyChk = document.getElementById("nex-followup-zero-only");
   const zeroOnly = window.getNexFollowupZeroOnly();
   if (zeroOnlyChk) zeroOnlyChk.checked = zeroOnly;
@@ -45536,6 +45609,222 @@ window.desenharQuadrasKmz = async function(map, empId) {
   }
 };
 
+window.kmzEtiquetaCurta = function(nome, empId) {
+  let s = String(nome || "").trim();
+  const id = String(empId || "").trim();
+  if (id && s.toUpperCase().startsWith(id.toUpperCase())) {
+    s = s.slice(id.length).replace(/^[\s\-–—:]+/, "").trim();
+  }
+  if (s.indexOf(" - ") >= 0) s = s.split(" - ").pop().trim();
+  return s || String(nome || "").trim();
+};
+
+window.kmzChavesLote = function(nome, empId) {
+  const norm = window.normKmzLotKey || function(v) { return String(v || "").toLowerCase().replace(/[^a-z0-9]/g, ""); };
+  const n = norm(nome);
+  const emp = norm(empId);
+  const sem = emp && n.indexOf(emp) === 0 ? n.slice(emp.length) : n;
+  const chaves = {};
+  [n, sem, emp && sem ? emp + sem : ""].forEach((k) => { if (k) chaves[k] = true; });
+  return Object.keys(chaves);
+};
+
+window.kmzResumoParcelas = function(bill) {
+  const hoje = (window.EstoqueComercialApp && typeof EstoqueComercialApp.todayStr === "function")
+    ? EstoqueComercialApp.todayStr()
+    : new Date().toISOString().slice(0, 10);
+  let pagas = 0;
+  let atraso = 0;
+  let faltam = 0;
+  let aberto = 0;
+  let vencido = 0;
+  let quitacao = 0;
+  Object.keys((bill && bill.parcelas) || {}).forEach((k) => {
+    const ps = Object.values(bill.parcelas[k] || {});
+    if (!ps.length) return;
+    const saldo = ps.reduce((t, p) => t + (Number(p.currentBalance) || 0), 0);
+    const due = String((ps[0] && ps[0].dueDate) || "").slice(0, 10);
+    if (saldo > 0.009) {
+      aberto += saldo;
+      if (due && due < hoje) {
+        atraso += 1;
+        vencido += saldo;
+        quitacao += ps.reduce((t, p) => t + Math.max(Number(p.currentBalanceWithAddition) || 0, Number(p.currentBalance) || 0), 0);
+      } else {
+        faltam += 1;
+        quitacao += saldo;
+      }
+      return;
+    }
+    const recebeu = ps.some((p) => (p.receipts || []).some((rc) => !/distrat|cancel|reparcel|repactu/i.test(String(rc && rc.type || ""))));
+    if (recebeu) pagas += 1;
+  });
+  const total = pagas + atraso + faltam;
+  return {
+    pagas: pagas,
+    atraso: atraso,
+    faltam: faltam,
+    pct: total ? pagas / total : 0,
+    quitacao: quitacao,
+    vencido: vencido,
+    aberto: aberto
+  };
+};
+
+window.kmzCarregarSituacao = async function(empId) {
+  const id = String(empId || "");
+  window._kmzSituacao = window._kmzSituacao || {};
+  if (window._kmzSituacao[id] && window._kmzSituacao[id].pronto) return window._kmzSituacao[id];
+  const indice = {};
+  const colocar = (nome, info) => {
+    window.kmzChavesLote(nome, id).forEach((k) => {
+      const prev = indice[k];
+      const peso = (x) => !x ? 0 : (x.status === "inadimplente" ? 3 : x.status === "adimplente" ? 2 : 1);
+      if (!prev || peso(info) >= peso(prev)) indice[k] = info;
+    });
+  };
+  const money = (v) => (Number(v) || 0).toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
+  let contratos = [];
+  let bills = [];
+  try {
+    const paginar = async (situation) => {
+      const all = [];
+      let offset = 0;
+      while (offset < 20000) {
+        const res = await window.siengeFetchWithRetry("/sales-contracts?enterpriseId=" + encodeURIComponent(id) + "&situation=" + situation + "&limit=200&offset=" + offset);
+        const results = (res && res.results) || [];
+        all.push.apply(all, results);
+        if (results.length < 200) break;
+        offset += 200;
+      }
+      return all;
+    };
+    const listas = await Promise.all([paginar(2), paginar(4)]);
+    contratos = listas[0].concat(listas[1]);
+  } catch (e) {
+    console.warn("[KMZ] contratos", e);
+  }
+  try {
+    const est = window.EstoqueComercialApp;
+    if (est && typeof est.fetchExtratoCc === "function" && typeof est.agruparExtratoCc === "function") {
+      const rows = await est.fetchExtratoCc(id);
+      bills = est.agruparExtratoCc((rows || []).map((r) => Object.assign({}, r, { _cc: id })));
+    }
+  } catch (e) {
+    console.warn("[KMZ] extrato", e);
+  }
+  const porTitulo = {};
+  bills.forEach((b) => { porTitulo[String(b.id)] = b; });
+  contratos.forEach((c) => {
+    if (!c) return;
+    const sit = String(c.situation == null ? "" : c.situation);
+    if (sit !== "2" && sit !== "4") return;
+    const clientes = c.salesContractCustomers || [];
+    const cliente = clientes.find((x) => x && x.main) || clientes[0] || {};
+    const titulo = String(c.receivableBillId || c.id || "");
+    const bill = porTitulo[titulo] || porTitulo[String(c.id || "")] || null;
+    const resumo = bill ? window.kmzResumoParcelas(bill) : { pagas: 0, atraso: 0, faltam: 0, pct: sit === "4" ? 1 : 0, quitacao: 0 };
+    let status = sit === "4" ? "quitado" : "adimplente";
+    if (sit !== "4" && resumo.atraso > 0) status = "inadimplente";
+    if (sit !== "4" && resumo.atraso === 0 && resumo.faltam === 0 && resumo.pagas > 0) status = "quitado";
+    const info = {
+      status: status,
+      nome: String(cliente.name || cliente.customerName || (bill && bill.cliente && (bill.cliente.name || bill.cliente.customerName)) || "").trim(),
+      customerId: cliente.id || cliente.customerId || (bill && bill.cliente && (bill.cliente.id || bill.cliente.customerId)) || "",
+      saleId: c.receivableBillId || c.id || "",
+      pagas: resumo.pagas,
+      atraso: resumo.atraso,
+      faltam: resumo.faltam,
+      pct: status === "quitado" ? 1 : resumo.pct,
+      quitacao: status === "quitado" ? 0 : resumo.quitacao,
+      money: money
+    };
+    const units = c.salesContractUnits || c.units || [];
+    (units.length ? units : [{ name: "" }]).forEach((u) => {
+      const nome = String((u && (u.name || u.unitName)) || "").trim();
+      if (nome) colocar(nome, info);
+    });
+    delete porTitulo[titulo];
+  });
+  Object.keys(porTitulo).forEach((titulo) => {
+    const bill = porTitulo[titulo];
+    const resumo = window.kmzResumoParcelas(bill);
+    const cli = bill.cliente || {};
+    let status = "adimplente";
+    if (resumo.atraso > 0) status = "inadimplente";
+    else if (resumo.faltam === 0 && resumo.pagas > 0) status = "quitado";
+    const info = {
+      status: status,
+      nome: String(cli.name || cli.customerName || "").trim(),
+      customerId: cli.id || cli.customerId || "",
+      saleId: titulo,
+      pagas: resumo.pagas,
+      atraso: resumo.atraso,
+      faltam: resumo.faltam,
+      pct: status === "quitado" ? 1 : resumo.pct,
+      quitacao: status === "quitado" ? 0 : resumo.quitacao,
+      money: money
+    };
+    (bill.units || []).forEach((u) => { if (u && u.name) colocar(u.name, info); });
+  });
+  const pack = { pronto: true, indice: indice };
+  if (contratos.length || bills.length) window._kmzSituacao[id] = pack;
+  return pack;
+};
+
+window.kmzAcharLote = function(indice, nome, empId) {
+  const mapa = indice || {};
+  const chaves = window.kmzChavesLote(nome, empId);
+  for (let i = 0; i < chaves.length; i++) {
+    if (mapa[chaves[i]]) return mapa[chaves[i]];
+  }
+  return null;
+};
+
+window.kmzVelocimetro = function(pct) {
+  const t = Math.max(0, Math.min(1, Number(pct) || 0));
+  const cx = 60;
+  const cy = 52;
+  const r = 34;
+  const pt = (p, rad) => {
+    const a = Math.PI * (1 - p);
+    const rr = rad == null ? r : rad;
+    return [cx + rr * Math.cos(a), cy - rr * Math.sin(a)];
+  };
+  const arco = (ate) => {
+    const ini = pt(0);
+    const fim = pt(Math.max(0.001, ate));
+    return "M " + ini[0].toFixed(1) + " " + ini[1].toFixed(1) + " A " + r + " " + r + " 0 0 1 " + fim[0].toFixed(1) + " " + fim[1].toFixed(1);
+  };
+  const ponta = pt(t, r - 12);
+  const cor = t >= 0.999 ? "#64748b" : "#105436";
+  return '<svg viewBox="0 0 120 74" width="120" height="74" aria-hidden="true">'
+    + '<path d="' + arco(1) + '" fill="none" stroke="#e7efe9" stroke-width="8" stroke-linecap="round"></path>'
+    + '<path d="' + arco(t) + '" fill="none" stroke="' + cor + '" stroke-width="8" stroke-linecap="round"></path>'
+    + '<line x1="' + cx + '" y1="' + cy + '" x2="' + ponta[0].toFixed(1) + '" y2="' + ponta[1].toFixed(1) + '" stroke="#1e293b" stroke-width="2" stroke-linecap="round"></line>'
+    + '<circle cx="' + cx + '" cy="' + cy + '" r="3" fill="#1e293b"></circle>'
+    + '<text x="' + cx + '" y="' + (cy + 16) + '" text-anchor="middle" font-size="13" font-weight="800" fill="' + cor + '">' + Math.round(t * 100) + '%</text>'
+    + '</svg>';
+};
+
+window.kmzHtmlResumo = function(etiqueta, info) {
+  const esc = (s) => String(s == null ? "" : s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  const rotulo = esc(etiqueta || "Lote");
+  if (!info) {
+    return '<div class="kmz-tip"><strong>' + rotulo + '</strong><p>Sem contrato vinculado a este lote.</p></div>';
+  }
+  const status = info.status === "inadimplente" ? "Ativo inadimplente" : (info.status === "adimplente" ? "Ativo adimplente" : "Quitado");
+  const money = info.money || function(v) { return (Number(v) || 0).toLocaleString("pt-BR", { style: "currency", currency: "BRL" }); };
+  return '<div class="kmz-tip">'
+    + '<strong>' + rotulo + '</strong>'
+    + '<div class="kmz-tip-nome">' + esc(info.nome || "Cliente") + '</div>'
+    + '<div class="kmz-tip-status is-' + esc(info.status) + '">' + status + '</div>'
+    + window.kmzVelocimetro(info.pct)
+    + '<p>' + info.pagas + ' pagas · ' + info.atraso + ' em atraso · ' + info.faltam + ' a pagar</p>'
+    + '<p>Valor de quitação <b>' + esc(money(info.quitacao)) + '</b></p>'
+    + '</div>';
+};
+
 window.abrirMapaKmz = async function(empId) {
   const id = String(empId || "");
   const modal = document.getElementById("map-modal-overlay");
@@ -45581,18 +45870,100 @@ window.abrirMapaKmz = async function(empId) {
       return pts;
     };
     if (typeof window.desenharQuadrasKmz === "function") window.desenharQuadrasKmz(map, id);
+    if (!document.getElementById("kmz-lote-style")) {
+      const style = document.createElement("style");
+      style.id = "kmz-lote-style";
+      style.textContent = ""
+        + ".kmz-lote-icon{background:transparent;border:none;}"
+        + ".kmz-lote{display:flex;align-items:center;gap:2px;transform:translate(-5px,-5px);cursor:pointer;}"
+        + ".kmz-lote-bola{width:10px;height:10px;border-radius:50%;box-shadow:0 0 0 1px #fff,0 0 0 2px rgba(15,23,42,.35);flex:none;}"
+        + ".kmz-lote-nome{font-size:10px;font-weight:800;line-height:14px;color:#0f172a;background:rgba(255,255,255,.94);border-radius:4px;padding:0 3px;white-space:nowrap;}"
+        + ".kmz-lote.is-quitado .kmz-lote-bola{background:#94a3b8;}"
+        + ".kmz-lote.is-adimplente .kmz-lote-bola{background:#16a34a;}"
+        + ".kmz-lote.is-inadimplente .kmz-lote-bola{background:#dc2626;}"
+        + ".kmz-lote.is-neutro .kmz-lote-bola{background:#facc15;}"
+        + ".leaflet-tooltip.kmz-lote-tip{background:#fff;color:#0f172a;border:1px solid #e2e8f0;border-radius:10px;box-shadow:0 8px 24px rgba(0,0,0,.18);padding:8px 10px;}"
+        + ".leaflet-tooltip.kmz-lote-tip .kmz-tip{min-width:148px;font-family:inherit;}"
+        + ".leaflet-tooltip.kmz-lote-tip .kmz-tip strong{display:block;font-size:.84rem;}"
+        + ".leaflet-tooltip.kmz-lote-tip .kmz-tip-nome{font-size:.78rem;font-weight:700;margin-top:2px;}"
+        + ".leaflet-tooltip.kmz-lote-tip .kmz-tip-status{font-size:.72rem;font-weight:800;margin:2px 0 4px;}"
+        + ".leaflet-tooltip.kmz-lote-tip .kmz-tip-status.is-quitado{color:#475569;}"
+        + ".leaflet-tooltip.kmz-lote-tip .kmz-tip-status.is-adimplente{color:#166534;}"
+        + ".leaflet-tooltip.kmz-lote-tip .kmz-tip-status.is-inadimplente{color:#991b1b;}"
+        + ".leaflet-tooltip.kmz-lote-tip .kmz-tip p{margin:2px 0 0;font-size:.75rem;color:#334155;}"
+        + ".kmz-legenda{background:rgba(255,255,255,.96);border-radius:10px;padding:8px 10px;box-shadow:0 4px 14px rgba(0,0,0,.16);font-size:.75rem;color:#0f172a;line-height:1.35;}"
+        + ".kmz-legenda div{display:flex;align-items:center;gap:6px;margin-top:3px;}"
+        + ".kmz-legenda i{width:10px;height:10px;border-radius:50%;display:inline-block;box-shadow:0 0 0 1px rgba(15,23,42,.2);}"
+        + ".kmz-legenda .is-q{background:#94a3b8;}.kmz-legenda .is-a{background:#16a34a;}.kmz-legenda .is-i{background:#dc2626;}"
+        + ".kmz-legenda p{margin:6px 0 0;color:#64748b;font-size:.7rem;}";
+      document.head.appendChild(style);
+    }
+    const marcas = [];
     (data.placemarks || []).forEach((p) => {
       const pts = guardar(p && (p.coords || p.coordinates));
       if (pts.length !== 1) return;
       const nomeLote = String((p && (p.name || p.lot_name)) || "").trim();
-      const mark = L.circleMarker(pts[0], {
-        radius: 4,
-        color: "#854d0e",
-        weight: 1,
-        fillColor: "#facc15",
-        fillOpacity: 1
-      }).addTo(map);
-      if (nomeLote) mark.bindTooltip(nomeLote, { direction: "top" });
+      const etiqueta = window.kmzEtiquetaCurta(nomeLote, id) || nomeLote || "Lote";
+      const icon = L.divIcon({
+        className: "kmz-lote-icon",
+        html: '<div class="kmz-lote is-neutro"><i class="kmz-lote-bola"></i><b class="kmz-lote-nome"></b></div>',
+        iconSize: [0, 0],
+        iconAnchor: [0, 0]
+      });
+      const mark = L.marker(pts[0], { icon: icon, interactive: true, keyboard: false }).addTo(map);
+      const caixa = mark.getElement && mark.getElement();
+      const nomeEl = caixa && caixa.querySelector(".kmz-lote-nome");
+      if (nomeEl) nomeEl.textContent = etiqueta;
+      const escNome = String(etiqueta).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+      mark.bindTooltip('<div class="kmz-tip"><strong>' + escNome + '</strong><p>Lendo o contrato…</p></div>', { direction: "top", opacity: 1, className: "kmz-lote-tip", offset: [10, -6] });
+      mark.on("click", () => {
+        const info = mark._kmzInfo;
+        if (!info || !info.customerId || typeof window.viewCustomerCard !== "function") return;
+        const modalMapa = document.getElementById("map-modal-overlay");
+        if (modalMapa) {
+          modalMapa.classList.remove("active");
+          modalMapa.style.display = "none";
+        }
+        window.viewCustomerCard(info.customerId, info.saleId);
+      });
+      marcas.push({ mark: mark, nome: nomeLote, etiqueta: etiqueta });
+    });
+    const Legenda = L.Control.extend({
+      options: { position: "bottomleft" },
+      onAdd: function() {
+        const div = L.DomUtil.create("div", "kmz-legenda");
+        div.innerHTML = '<b>Lotes</b>'
+          + '<div><i class="is-q"></i>Cinza · quitado</div>'
+          + '<div><i class="is-a"></i>Verde · ativo adimplente</div>'
+          + '<div><i class="is-i"></i>Vermelha · ativo inadimplente</div>'
+          + '<p id="kmz-legenda-status">Lendo contratos…</p>';
+        L.DomEvent.disableClickPropagation(div);
+        return div;
+      }
+    });
+    map.addControl(new Legenda());
+    const geracao = (window._kmzMapaGeracao = (window._kmzMapaGeracao || 0) + 1);
+    window.kmzCarregarSituacao(id).then((pack) => {
+      if (geracao !== window._kmzMapaGeracao) return;
+      const indice = (pack && pack.indice) || {};
+      marcas.forEach((item) => {
+        const info = window.kmzAcharLote(indice, item.nome, id);
+        item.mark._kmzInfo = info;
+        const el = item.mark.getElement && item.mark.getElement();
+        const box = el && el.querySelector(".kmz-lote");
+        if (box) {
+          box.classList.remove("is-neutro", "is-quitado", "is-adimplente", "is-inadimplente");
+          box.classList.add(info ? ("is-" + info.status) : "is-neutro");
+        }
+        item.mark.unbindTooltip();
+        item.mark.bindTooltip(window.kmzHtmlResumo(item.etiqueta, info), { direction: "top", opacity: 1, className: "kmz-lote-tip", offset: [10, -6] });
+      });
+      const status = document.getElementById("kmz-legenda-status");
+      if (status) status.textContent = "Passe o mouse para o resumo. Clique para abrir a ficha.";
+    }).catch((e) => {
+      console.warn("[KMZ] situação", e);
+      const status = document.getElementById("kmz-legenda-status");
+      if (status) status.textContent = "Não foi possível ler os contratos agora.";
     });
     (data.quadras || []).forEach((q) => guardar(q && (q.coords || q.coordinates)));
     if (limites.length) map.fitBounds(limites, { padding: [28, 28], maxZoom: 18 });
@@ -52908,8 +53279,9 @@ window.syncGlobalConfigFromFirebase = async function() {
                     }
                     return;
                 }
-                if (k === "crm_moura_financiamentos_proc" && typeof window.mergeFinanciamentosProc === "function") {
-                    const merged = window.mergeFinanciamentosProc(localStorage.getItem(k), globalData[k] || "{}");
+                if (k === "crm_moura_financiamentos_proc") {
+                    if (typeof window.crmFinanciamentosMesclar !== "function") return;
+                    const merged = window.crmFinanciamentosMesclar(localStorage.getItem(k), globalData[k] || "{}");
                     if (merged && merged !== (localStorage.getItem(k) || "")) {
                         _originalSetItem.call(localStorage, k, merged);
                         changed = true;
@@ -53130,12 +53502,9 @@ window.forceUploadLocalConfig = async function(silent = true) {
         try {
           const snap = await window.firebaseCollections.getDoc(docRef);
           const cloud = snap && (typeof snap.exists === "function" ? snap.exists() : snap.exists) ? (snap.data() || {}) : {};
-          if (typeof window.mergeFinanciamentosProc === "function") {
-            const mergedProc = window.mergeFinanciamentosProc(payload.crm_moura_financiamentos_proc || "{}", cloud.crm_moura_financiamentos_proc || "{}");
-            if (mergedProc && mergedProc !== "{}") {
-              payload.crm_moura_financiamentos_proc = mergedProc;
-              try { _originalSetItem.call(localStorage, "crm_moura_financiamentos_proc", mergedProc); } catch (e) {}
-            }
+          if (typeof window.crmFinanciamentosMesclar === "function") {
+            const mergedProc = window.crmFinanciamentosMesclar(payload.crm_moura_financiamentos_proc || "{}", cloud.crm_moura_financiamentos_proc || "{}");
+            if (mergedProc && mergedProc !== "{}") payload.crm_moura_financiamentos_proc = mergedProc;
           }
           if (payload.crm_plano_visoes_v2 && cloud.crm_plano_visoes_v2) {
             payload.crm_plano_visoes_v2 = window.mergePlanoVisoes(payload.crm_plano_visoes_v2, cloud.crm_plano_visoes_v2);
@@ -53504,12 +53873,9 @@ localStorage.setItem = function(key, value) {
                     try {
                       const snap = await window.firebaseCollections.getDoc(docRef);
                       const cloud = snap && snap.exists() ? (snap.data() || {}) : {};
-                      if (typeof window.mergeFinanciamentosProc === "function") {
-                        const mergedProc = window.mergeFinanciamentosProc(payload.crm_moura_financiamentos_proc || "{}", cloud.crm_moura_financiamentos_proc || "{}");
-                        if (mergedProc && mergedProc !== "{}") {
-                          payload.crm_moura_financiamentos_proc = mergedProc;
-                          try { _originalSetItem.call(localStorage, "crm_moura_financiamentos_proc", mergedProc); } catch (e) {}
-                        }
+                      if (typeof window.crmFinanciamentosMesclar === "function") {
+                        const mergedProc = window.crmFinanciamentosMesclar(payload.crm_moura_financiamentos_proc || "{}", cloud.crm_moura_financiamentos_proc || "{}");
+                        if (mergedProc && mergedProc !== "{}") payload.crm_moura_financiamentos_proc = mergedProc;
                       }
                       if (payload.crm_plano_visoes_v2 && cloud.crm_plano_visoes_v2) {
                         payload.crm_plano_visoes_v2 = window.mergePlanoVisoes(payload.crm_plano_visoes_v2, cloud.crm_plano_visoes_v2);

@@ -89,6 +89,26 @@ const AlertasPopupApp = {
         <p>O almoço é das <strong>12h30–13h42</strong>.</p>`
     },
     {
+      id: "ponto-sexta",
+      nome: "Pendências no cartão de ponto",
+      quando: "Na sexta-feira, no login. Se a pessoa entra depois, abre até a sexta seguinte. Uma vez nesse ciclo, ao marcar Ciente.",
+      logica: "Pede para checar as pendências no cartão de ponto do time. Ciente guarda a sexta daquele ciclo e o aviso só volta na sexta seguinte.",
+      quem: "israel@mouraleite.com.br.",
+      titulo: "Pendências no cartão de ponto",
+      corpo: `<p>Cheque as pendências no cartão de ponto do time.</p>
+        <p style="color:#64748b;font-size:0.82rem;">Na tela real o botão é Ciente.</p>`
+    },
+    {
+      id: "ponto-fechamento",
+      nome: "Validar o ponto do time",
+      quando: "No login, no dia 15 de cada mês. Se o dia 15 não for dia útil, no próximo dia útil. Se a pessoa entra depois, abre até o fechamento seguinte. Uma vez nesse ciclo, ao marcar Ciente.",
+      logica: "Pede para validar o ponto do time. O período fechado vai do dia 15 do mês anterior até o dia 14 do mês do fechamento. Ciente dispensa até o próximo dia 15, ou o próximo dia útil.",
+      quem: "israel@mouraleite.com.br.",
+      titulo: "Validar o ponto do time",
+      corpo: `<p>Valide o ponto do time. O mês fechou de 15/10/2026 até 14/11/2026.</p>
+        <p style="color:#64748b;font-size:0.82rem;">Na tela real o botão é Ciente. Se a sexta cair no mesmo dia, os dois textos vêm no mesmo aviso.</p>`
+    },
+    {
       id: "esteira",
       nome: "Etapas vencidas na esteira",
       quando: "Na segunda-feira às 08:00. Se a segunda não for dia útil, no próximo dia útil. Se a pessoa entra depois, abre na hora e vale para aquela semana. Uma vez por semana, ao fechar.",

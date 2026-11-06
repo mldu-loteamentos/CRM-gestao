@@ -576,13 +576,27 @@ const FinanciamentoApp = {
     if (window.lucide) lucide.createIcons();
   },
 
-  loadAllProcesses() {
+  lerMapaProc(raw) {
     try {
-      const obj = JSON.parse(localStorage.getItem(FIN_PROC_KEY) || "{}") || {};
+      const obj = JSON.parse(raw || "{}") || {};
       return obj && typeof obj === "object" && !Array.isArray(obj) ? obj : {};
     } catch (e) {
       return {};
     }
+  },
+
+  /* Disco, aba e memória. A nuvem às vezes devolve a lista antiga e apagava o financiamento recém-incluído. */
+  loadAllProcesses() {
+    let disco = "{}";
+    let sessao = "{}";
+    try { disco = localStorage.getItem(FIN_PROC_KEY) || "{}"; } catch (e) {}
+    try { sessao = sessionStorage.getItem(FIN_PROC_KEY) || "{}"; } catch (e) {}
+    let merged = disco;
+    if (typeof window.mergeFinanciamentosProc === "function") {
+      merged = window.mergeFinanciamentosProc(disco, sessao);
+      merged = window.mergeFinanciamentosProc(merged, JSON.stringify(window._finProcMem || {}));
+    }
+    return this.lerMapaProc(merged);
   },
 
   isProcessoAberto(proc) {
@@ -683,9 +697,15 @@ const FinanciamentoApp = {
 
   saveProcess(proc) {
     if (!proc || proc.customerId == null || proc.contractId == null) return;
+    const key = this.procKey(proc.customerId, proc.contractId);
+    window._finProcMem = window._finProcMem || {};
+    window._finProcMem[key] = proc;
     const all = this.loadAllProcesses();
-    all[this.procKey(proc.customerId, proc.contractId)] = proc;
-    localStorage.setItem(FIN_PROC_KEY, JSON.stringify(all));
+    all[key] = proc;
+    window._finProcMem = all;
+    const raw = JSON.stringify(all);
+    try { sessionStorage.setItem(FIN_PROC_KEY, raw); } catch (e) {}
+    try { localStorage.setItem(FIN_PROC_KEY, raw); } catch (e) {}
     if (window.forceUploadLocalConfig) window.forceUploadLocalConfig(true).catch(() => {});
     if (FinanciamentoState.view === "busca") this.renderAbertos();
   },
@@ -1391,10 +1411,29 @@ window.mergeFinanciamentosProc = function(localRaw, cloudRaw) {
     junto.concluidas = unirMapa(antigo.concluidas, recente.concluidas, true);
     junto.anexos = unirMapa(antigo.anexos, recente.anexos, false);
     junto.notas = unirMapa(antigo.notas, recente.notas, true);
+    if (!junto.currentStageId) junto.currentStageId = antigo.currentStageId || recente.currentStageId || null;
+    if (!junto.customerName) junto.customerName = antigo.customerName || recente.customerName || "";
+    if (!junto.titulo) junto.titulo = antigo.titulo || recente.titulo || "";
+    if (!junto.contractNumber) junto.contractNumber = antigo.contractNumber || recente.contractNumber || "";
     out[k] = junto;
   });
   return JSON.stringify(out);
 };
+
+/* O que está neste navegador agora, inclusive o financiamento aberto que o disco ainda não segurou. */
+window.financiamentosProcAtual = function () {
+  if (window.FinanciamentoApp && typeof window.FinanciamentoApp.loadAllProcesses === "function") {
+    try { return JSON.stringify(window.FinanciamentoApp.loadAllProcesses() || {}); }
+    catch (e) {}
+  }
+  try { return localStorage.getItem(FIN_PROC_KEY) || "{}"; }
+  catch (e2) { return "{}"; }
+};
+
+window.addEventListener("beforeunload", function () {
+  const proc = FinanciamentoState.process;
+  if (proc && window.FinanciamentoApp) window.FinanciamentoApp.saveProcess(proc);
+});
 
 document.addEventListener("tabChanged", (e) => {
   if (e.detail === "financiamento") FinanciamentoApp.init();
