@@ -326,6 +326,30 @@ const HomeDashboard = {
         hideIfEmpty: false,
         count: nexRows.length
       });
+      const validade = (typeof window.nexCollectAll === 'function' && typeof window.nexIsLegallyValid === 'function')
+        ? window.nexCollectAll().filter(it => it && window.nexIsLegallyValid(it).ok)
+        : [];
+      const validadeItems = validade.map(it => {
+        const titulo = String(it.titulo || it.saleId || '').replace(/^B-/i, '').split('-')[0];
+        const entregue = typeof window.nexParseIso === 'function' ? window.nexParseIso(it.deliveredAt) : '';
+        const mora = entregue && typeof window.nexAddDays === 'function' ? window.nexAddDays(entregue, 30) : '';
+        const desde = mora && typeof window.nexFmtBr === 'function' ? window.nexFmtBr(mora) : '';
+        return {
+          customerId: it.customerId,
+          saleId: titulo || it.saleId,
+          customerName: (typeof window.nexResolveCustomerName === 'function')
+            ? window.nexResolveCustomerName(it.customerId, it.titulo, it)
+            : ('NEX ' + titulo),
+          hint: desde ? ('Validade jurídica desde ' + desde) : 'Com validade jurídica'
+        };
+      });
+      groups.push({
+        id: 'nex-validade',
+        label: validadeItems.length + ' NEX com validade jurídica — avaliar o distrato antes de cancelar',
+        items: validadeItems,
+        hideIfEmpty: true,
+        count: validadeItems.length
+      });
       return groups;
     }
 
@@ -604,9 +628,9 @@ const HomeDashboard = {
                       <button type="button" onclick="window.closeHomeInsightList()" style="border:none; background:#f1f5f9; border-radius:6px; padding:4px 8px; font-size:0.75rem; font-weight:700; cursor:pointer; color:#334155;">Voltar</button>
                     </div>
                     ${clients.length ? clients.map(c => `
-                      <button type="button" class="home-insight-client-btn" data-customer-id="${this.escHtml(c.customerId)}" data-sale-id="${this.escHtml(c.saleId)}" data-titulo="${this.escHtml(this.displayedTitle(c) || c.saleId || '')}" style="display:block; width:100%; text-align:left; border:none; background:transparent; padding:7px 4px; cursor:pointer; font-size:0.84rem; font-weight:600; color:#105436; border-bottom:1px solid #f1f5f9;">
+                      <button type="button" class="home-insight-client-btn" data-insight-id="${this.escHtml(g.id)}" data-customer-id="${this.escHtml(c.customerId)}" data-sale-id="${this.escHtml(c.saleId)}" data-titulo="${this.escHtml(this.displayedTitle(c) || c.saleId || '')}" style="display:block; width:100%; text-align:left; border:none; background:transparent; padding:7px 4px; cursor:pointer; font-size:0.84rem; font-weight:600; color:#105436; border-bottom:1px solid #f1f5f9;">
                         ${this.escHtml(c.customerName || ('Cliente ' + c.customerId))}
-                        <span style="display:block; font-size:0.7rem; font-weight:500; color:#94a3b8;">Título ${this.escHtml(this.displayedTitle(c) || c.saleId || '')}</span>
+                        <span style="display:block; font-size:0.7rem; font-weight:500; color:#94a3b8;">Título ${this.escHtml(this.displayedTitle(c) || c.saleId || '')}${c.hint ? ' · ' + this.escHtml(c.hint) : ''}</span>
                       </button>`).join('') : `<div style="padding:8px; font-size:0.8rem; color:#64748b;">Nenhum cliente listado.</div>`}
                   </div>` : ''}
               </div>`;
@@ -642,7 +666,13 @@ const HomeDashboard = {
       btn.addEventListener('click', (ev) => {
         ev.preventDefault();
         ev.stopPropagation();
-        window.openHomeInsightClient(btn.getAttribute('data-customer-id'), btn.getAttribute('data-sale-id'), btn.getAttribute('data-titulo'));
+        const customerId = btn.getAttribute('data-customer-id');
+        const saleId = btn.getAttribute('data-sale-id');
+        if (btn.getAttribute('data-insight-id') === 'nex-validade' && typeof window.abrirAvaliacaoCancelamento === 'function') {
+          window.abrirAvaliacaoCancelamento(customerId, saleId);
+          return;
+        }
+        window.openHomeInsightClient(customerId, saleId, btn.getAttribute('data-titulo'));
       });
     });
   },

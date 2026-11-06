@@ -17251,6 +17251,9 @@ function formatCpfCnpj(val) {
     const simCheckAll = document.getElementById("simulador-check-all");
     const simFullContainer = document.getElementById("simulador-full-container");
     const simTaxaSelect = document.getElementById("simulador-taxa");
+    if (typeof window.renderAlertaDescontoEncargos === "function") {
+      try { window.renderAlertaDescontoEncargos(AppState.selectedCustomerId); } catch (e) { console.warn(e); }
+    }
 
     if (simInput && dbContract && dbContract.installments) {
       if (sale.status === "Quitado") {
@@ -17436,17 +17439,13 @@ function formatCpfCnpj(val) {
             }
             const taxaMultiplier = taxaVal;
             
-            if (simThMulta) {
-                if (taxaMultiplier === 1) simThMulta.textContent = "Multa (2%)";
-                else if (taxaMultiplier === 0.5) simThMulta.textContent = "Multa (1%)";
-                else simThMulta.textContent = "Multa (0%)";
-            }
+            const pctTxt = (v) => String(Number((Number(v) || 0).toFixed(2))).replace(".", ",");
+            if (simThMulta) simThMulta.textContent = "Multa (" + pctTxt(2 * taxaMultiplier) + "%)";
             const simThHon = document.getElementById("simulador-th-hon");
             if (simThHon) simThHon.style.display = margemHon > 0 ? "" : "none";
-            if (simThJuros) {
-                if (taxaMultiplier === 1) simThJuros.textContent = "Juros (1% a.m)";
-                else if (taxaMultiplier === 0.5) simThJuros.textContent = "Juros (0,5% a.m)";
-                else simThJuros.textContent = "Juros (0% a.m)";
+            if (simThJuros) simThJuros.textContent = "Juros (" + pctTxt(1 * taxaMultiplier) + "% a.m)";
+            if (typeof window.renderAlertaDescontoEncargos === "function") {
+                try { window.renderAlertaDescontoEncargos(AppState.selectedCustomerId); } catch (e) { console.warn(e); }
             }
 
             vencidasSimulador.forEach((inst, index) => {
@@ -29103,6 +29102,65 @@ window.shouldWaiveBoletoLateCharges = function(instIds, dueDateStr) {
   return { waive: !anyChargeable, graceLabels };
 };
 
+/**
+ * Boletos em que o cliente teve desconto em multa e juros, lidos das ocorrências do cliente.
+ * Boleto novo grava descontoEncargosPct. Boleto antigo: lê "Multa: X%" do texto (multa cheia = 2%).
+ * Multa 0% antiga fica de fora: pode ter sido isenção automática de quem estava no prazo.
+ */
+window.historicoDescontoEncargos = function(customerId) {
+  if (customerId == null || customerId === "") return [];
+  const notes = (typeof AppState !== "undefined" && AppState.notes) || {};
+  const list = typeof window.getCustomerNotesList === "function"
+    ? window.getCustomerNotesList(notes, customerId)
+    : (notes[String(customerId)] || []);
+  const out = [];
+  const vistos = new Set();
+  (list || []).forEach((n) => {
+    if (!n) return;
+    const chave = n.id || [n.date, String(n.text || "").slice(0, 80)].join("|");
+    if (vistos.has(chave)) return;
+    vistos.add(chave);
+    let pct = Number(n.descontoEncargosPct);
+    if (!(pct > 0)) {
+      if (n.descontoEncargosPct != null) return;
+      const m = /Boleto gerado\..*?\|\s*Multa:\s*([\d.,]+)%/.exec(String(n.text || ""));
+      if (!m) return;
+      const multa = parseFloat(m[1].replace(",", "."));
+      if (!(multa > 0 && multa < 2)) return;
+      pct = Math.round((1 - multa / 2) * 100);
+    }
+    if (pct > 0) out.push({ date: n.date || "", pct: pct, author: n.author || "", saleId: n.saleId || "" });
+  });
+  out.sort((a, b) => String(b.date).localeCompare(String(a.date)));
+  return out;
+};
+
+window.renderAlertaDescontoEncargos = function(customerId) {
+  const box = document.getElementById("simulador-alerta-desconto");
+  if (!box) return;
+  const hist = window.historicoDescontoEncargos(customerId);
+  if (!hist.length) {
+    box.style.display = "none";
+    box.innerHTML = "";
+    return;
+  }
+  const esc = (v) => String(v == null ? "" : v).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "\"": "&quot;", "'": "&#39;" }[c]));
+  const dataBr = (iso) => {
+    const d = new Date(iso);
+    return isNaN(d.getTime()) ? "" : d.toLocaleDateString("pt-BR");
+  };
+  const ultimos = hist.slice(0, 5).map((h) => {
+    const quem = h.author ? " por " + esc(h.author) : "";
+    return "<li>" + esc(dataBr(h.date)) + ": " + h.pct + "%" + quem + "</li>";
+  }).join("");
+  const maior = Math.max.apply(null, hist.map((h) => h.pct));
+  const vezes = hist.length === 1 ? "1 vez" : hist.length + " vezes";
+  box.innerHTML = "<b>Atenção: este cliente já teve desconto em multa e juros " + vezes + "</b> (maior desconto: " + maior + "%)."
+    + "<ul style=\"margin: 6px 0 0 18px; padding: 0;\">" + ultimos + "</ul>"
+    + (hist.length > 5 ? "<div style=\"margin-top: 4px;\">E mais " + (hist.length - 5) + " anterior(es) nas ocorrências.</div>" : "");
+  box.style.display = "block";
+};
+
 window.renderReprocessChargesSummary = function(instIds, dueDateStr, taxaMultiplier) {
   const box = document.getElementById("reprocess-charges-summary");
   if (!box) return { multa: 0, juros: 0, principal: 0 };
@@ -29507,7 +29565,12 @@ window.submitReprocessBoleto = async function() {
       ? window.readHonorariosMarginPct({ forBoleto: true })
       : 0;
     const honPart = honPct > 0 ? ` | Honorários: ${honPct}% (incluídos no índice de juros)` : "";
-    const boletoText = `Boleto gerado. ${parcelasPart} | Novo vencimento: ${dueDateBr} | Multa: ${fine}% | Juros: ${interest}%${honPart} | Lembrete automático: Checar pagamento em ${checkDateBr} (${checkHint})`;
+    // Desconto pedido pelo cliente (não conta a isenção automática de quem ainda está no prazo).
+    const descontoEncargosPct = (!waiver.waive && Number.isFinite(currentReprocessTaxa) && currentReprocessTaxa < 1)
+      ? Math.round((1 - Math.max(0, currentReprocessTaxa)) * 100)
+      : 0;
+    const descPart = descontoEncargosPct > 0 ? ` | Desconto em multa e juros: ${descontoEncargosPct}%` : "";
+    const boletoText = `Boleto gerado. ${parcelasPart} | Novo vencimento: ${dueDateBr} | Multa: ${fine}% | Juros: ${interest}%${descPart}${honPart} | Lembrete automático: Checar pagamento em ${checkDateBr} (${checkHint})`;
 
     const promessaSection = document.getElementById('reprocess-promessa-section');
     const isPromessaHidden = promessaSection && promessaSection.style.display === 'none';
@@ -29552,6 +29615,7 @@ window.submitReprocessBoleto = async function() {
       checkPayment: true,
       canal: canal,
       iniciativa: iniciativa,
+      descontoEncargosPct: descontoEncargosPct,
       pastTexts: []
     };
 
@@ -37736,6 +37800,10 @@ window.ensureFilaSignalsIndex = function() {
       .then(() => {
         if (typeof window.rebuildNexCumpridaIndex === "function") window.rebuildNexCumpridaIndex();
         if (typeof window.nexScheduleCumpridaCheck === "function") window.nexScheduleCumpridaCheck();
+        if (window.HomeDashboard && typeof HomeDashboard.renderInsights === "function") {
+          const insights = document.getElementById("home-op-insights-container");
+          if (insights && insights.style.display !== "none") HomeDashboard.renderInsights();
+        }
         window.paintFilaSignalCells();
         if (typeof window.repaintFilaAgingBadges === "function") window.repaintFilaAgingBadges();
         const pane = document.getElementById("tab-dashboard");
