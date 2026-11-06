@@ -652,6 +652,15 @@ const EstoqueComercialApp = {
     return this.fbReady();
   },
 
+  /** A conferência geral roda no batimento do servidor e fica em estoque_comercial/_conferencia_geral. Vale a mais recente. */
+  adotarConferenciaServidor(conf) {
+    if (!conf || !Array.isArray(conf.ccs) || this.state._confGeralRunning) return;
+    const local = this.loadConferenciaGeral();
+    if (local && String(local.at || "") >= String(conf.at || "")) return;
+    this.state.conferenciaGeral = conf;
+    try { localStorage.setItem(this.CONF_GERAL_KEY, JSON.stringify(conf)); } catch (e) {}
+  },
+
   async loadFirebase() {
     if (!this.fbReady()) return null;
     const { doc, getDoc, getDocs, collection } = window.firebaseCollections;
@@ -660,9 +669,14 @@ const EstoqueComercialApp = {
       const colSnap = await getDocs(collection(window.firebaseDb, this.FB_COL));
       const byId = new Map();
       const ccDone = [];
+      let confServidor = null;
       colSnap.forEach(d => {
         if (d.id === "_meta") return;
         const data = d.data() || {};
+        if (d.id === "_conferencia_geral") {
+          confServidor = data;
+          return;
+        }
         const at = String(data.updatedAt || "");
         if (Array.isArray(data.units)) {
           data.units.forEach((u) => {
@@ -674,6 +688,7 @@ const EstoqueComercialApp = {
         }
         if (data.enterpriseId) ccDone.push(String(data.enterpriseId));
       });
+      this.adotarConferenciaServidor(confServidor);
       const units = [...byId.values()].map((x) => x.u);
       if (!units.length) return null;
       const meta = metaSnap.exists() ? metaSnap.data() : {};
@@ -717,7 +732,7 @@ const EstoqueComercialApp = {
         grouped[cc].push(u);
       });
 
-      const keep = new Set(["_meta", "_batimento_state"]);
+      const keep = new Set(["_meta", "_batimento_state", "_conferencia_geral"]);
       const writes = [];
       Object.keys(grouped).forEach(cc => {
         const list = grouped[cc];
@@ -3641,6 +3656,7 @@ const EstoqueComercialApp = {
       let vencidoComAcrescimo = 0;
       let recebido = 0;
       let ultimaBaixa = "";
+      const porDia = {};
       const abertas = [];
       Object.values(b.parcelas).forEach((partes) => {
         const ps = Object.values(partes);
@@ -3657,13 +3673,15 @@ const EstoqueComercialApp = {
         }
         ps.forEach((p) => (p.receipts || []).forEach((rc) => {
           if (/distrat|cancel|reparcel|repactu/i.test(String(rc && rc.type || ""))) return;
-          recebido += Number(rc.netReceipt != null ? rc.netReceipt : rc.value) || 0;
+          const val = Number(rc.netReceipt != null ? rc.netReceipt : rc.value) || 0;
+          recebido += val;
           const d = String(rc.date || "").slice(0, 10);
+          if (d) porDia[d] = (porDia[d] || 0) + val;
           if (d > ultimaBaixa) ultimaBaixa = d;
         }));
       });
       abertas.sort((x, y) => x.due.localeCompare(y.due));
-      return { ...b, aberto, vencido, vencidoComAcrescimo, recebido, ultimaBaixa, nParcelas: Object.keys(b.parcelas).length, abertas: abertas.slice(0, 24) };
+      return { ...b, aberto, vencido, vencidoComAcrescimo, recebido, ultimaBaixa, porDia, nParcelas: Object.keys(b.parcelas).length, abertas: abertas.slice(0, 24) };
     });
   },
 
@@ -3784,6 +3802,20 @@ const EstoqueComercialApp = {
   },
 
   /** Recalcula as unidades do centro pelo extrato do Sienge e guarda o confronto Sienge × Integra. */
+  /**
+   * Valor recebido na data da quitação e total recebido nos títulos da unidade (extrato do Contas a Receber).
+   * O Registro usa os dois para separar quitação com financiamento (volume na data da baixa) de recursos próprios.
+   */
+  comValorQuitacao(u, mine) {
+    if (!u || !mine || !mine.length) return u;
+    const iso = this.isoQuitacao(u.quitacaoDate);
+    const r2 = (v) => Math.round((Number(v) || 0) * 100) / 100;
+    const recebido = r2(mine.reduce((t, b) => t + (Number(b.recebido) || 0), 0));
+    const valor = iso ? r2(mine.reduce((t, b) => t + (Number(b.porDia && b.porDia[iso]) || 0), 0)) : null;
+    if (u.quitacaoValor === valor && u.quitacaoRecebido === recebido) return u;
+    return { ...u, quitacaoValor: valor, quitacaoRecebido: recebido };
+  },
+
   async conferirComSienge(ccId, opts) {
     opts = opts || {};
     if (typeof window.siengeFetchWithRetry !== "function") return null;
@@ -3831,7 +3863,7 @@ const EstoqueComercialApp = {
       const finAntes = this.financialStatus(u);
       if (opts.pularQuitados && finAntes === "Quitado" && !saldoVivo) {
         mine.forEach((b) => usados.add(b.id));
-        return u;
+        return this.comValorQuitacao(u, mine);
       }
       if ((u.distratoTitulo && mine.length) || (finAntes === "Distratado" && saldoVivo)) {
         if (finAntes === "Distratado" && saldoVivo) reativados += 1;
@@ -3882,6 +3914,8 @@ const EstoqueComercialApp = {
           quitado: false,
           quitacaoDate: null,
           quitacaoFonte: null,
+          quitacaoValor: null,
+          quitacaoRecebido: null,
           quitadoEvidencia: false,
           outstandingBalance: aberto,
           presentDebitBalance: aberto,
@@ -3893,7 +3927,7 @@ const EstoqueComercialApp = {
       if (recebido <= 0.009) return u;
       if (fin0 !== "Quitado") quitadosNovos += 1;
       const ultima = mine.map((b) => b.ultimaBaixa).filter(Boolean).sort().pop() || null;
-      return {
+      return this.comValorQuitacao({
         ...base,
         relFin: "quitado",
         quitado: true,
@@ -3904,7 +3938,7 @@ const EstoqueComercialApp = {
         kpiAVencer: 0,
         openParcelas: [],
         quitacaoDate: (u.quitacaoFonte === "sienge" && this.isoQuitacao(u.quitacaoDate)) || this.isoQuitacao(ultima) || this.sealQuitacao({ ...u, quitado: true })
-      };
+      }, mine);
     });
     const sumidos = semTitulo.filter((s) => s._uid && Number(s.saldo) > 0.009 && s.titulo);
     for (let i = 0; i < sumidos.length; i += 4) {
@@ -4025,6 +4059,29 @@ const EstoqueComercialApp = {
     return this.state.conferenciaGeral;
   },
 
+  /** Linha de um empreendimento no relatório da conferência geral. O batimento do servidor usa a mesma função. */
+  resumoConferencia(c) {
+    return {
+      ccId: c.ccId,
+      nome: this.empName(c.ccId),
+      sienge: c.sienge,
+      integra: c.integra,
+      semUnidade: { n: c.semUnidade.length, valor: c.semUnidade.reduce((t, b) => t + (Number(b.aberto) || 0), 0) },
+      motivos: c.semUnidade.reduce((m, b) => {
+        const k = b.motivo || "outro";
+        m[k] = m[k] || { n: 0, valor: 0 };
+        m[k].n += 1;
+        m[k].valor += Number(b.aberto) || 0;
+        return m;
+      }, {}),
+      reabertos: (c.reabertos || 0) + (c.reativados || 0),
+      semTitulo: c.semTitulo.length,
+      titulosSemUnidade: c.semUnidade,
+      unidadesSemTitulo: c.semTitulo,
+      rateioFalhas: c.rateioFalhas || []
+    };
+  },
+
   /** Batimento de todos os empreendimentos pelo extrato do Contas a Receber (poucas consultas por centro, sem ficha por cliente). */
   async conferirTodos(opts) {
     const ids = this.ccsParaConferir();
@@ -4053,25 +4110,7 @@ const EstoqueComercialApp = {
       try {
         const c = await this.conferirComSienge(id, { pularQuitados: true, rotulo: `Empreendimento ${ordem}/${ids.length}` });
         if (!c) continue;
-        geral.ccs.push({
-          ccId: c.ccId,
-          nome: this.empName(c.ccId),
-          sienge: c.sienge,
-          integra: c.integra,
-          semUnidade: { n: c.semUnidade.length, valor: c.semUnidade.reduce((t, b) => t + (Number(b.aberto) || 0), 0) },
-          motivos: c.semUnidade.reduce((m, b) => {
-            const k = b.motivo || "outro";
-            m[k] = m[k] || { n: 0, valor: 0 };
-            m[k].n += 1;
-            m[k].valor += Number(b.aberto) || 0;
-            return m;
-          }, {}),
-          reabertos: (c.reabertos || 0) + (c.reativados || 0),
-          semTitulo: c.semTitulo.length,
-          titulosSemUnidade: c.semUnidade,
-          unidadesSemTitulo: c.semTitulo,
-          rateioFalhas: c.rateioFalhas || []
-        });
+        geral.ccs.push(this.resumoConferencia(c));
       } catch (e) {
         console.warn("[Estoque] conferência geral", id, e);
         geral.falhas.push(id);

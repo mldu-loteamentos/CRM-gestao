@@ -1,0 +1,28 @@
+name: Batimento do estoque (retomada)
+
+# O cron da Vercel abre o batimento às 07:00. Cada passada chama a seguinte sozinha.
+# Se essa corrente parar no meio do dia, esta chamada de hora em hora retoma de onde parou.
+# Dia já fechado: o endpoint só responde "Batimento do dia já concluído." (sem consulta ao Sienge).
+
+on:
+  schedule:
+    # 07:30 às 18:30 em São Paulo (10:30 às 21:30 UTC)
+    - cron: "30 10-21 * * *"
+  workflow_dispatch:
+
+jobs:
+  retomar:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Pedir a próxima passada
+        env:
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+        run: |
+          URL="https://crm-gestao.vercel.app/api/estoque-batimento"
+          AUTH=()
+          if [ -n "$CRON_SECRET" ]; then
+            AUTH=(-H "Authorization: Bearer $CRON_SECRET")
+          fi
+          BODY=$(curl -sS --max-time 90 "$URL" "${AUTH[@]}" || true)
+          echo "$BODY" | head -c 3000

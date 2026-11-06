@@ -1,7 +1,8 @@
 {
   "functions": {
     "api/gateway.js": {
-      "maxDuration": 60
+      "maxDuration": 60,
+      "includeFiles": "estoque-comercial.js"
     }
   },
   "rewrites": [

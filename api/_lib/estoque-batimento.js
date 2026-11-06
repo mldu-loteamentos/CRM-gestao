@@ -17,6 +17,7 @@ const {
   needsSaldo,
   aplicarExtratoObra
 } = require("../../lib/estoque-batimento-core");
+const { criarConferencia } = require("../../lib/estoque-conferencia-runner");
 
 const SIENGE_DOMAIN = "mouraleite";
 const SIENGE_USER = "mouraleite-contas-a-pagar";
@@ -44,6 +45,9 @@ const FB_CHUNK = 400;
 const FB_DOC_BYTES = 650000;
 /** maxDuration é 60s. O restante fica para gravar e chamar a passagem seguinte. */
 const BUDGET_MS = 40000;
+/** Na conferência completa só começa um empreendimento novo até aqui (o maior levou 22s no teste: 18 + 22 + gravação < 60). */
+const CONF_START_MS = 18000;
+const CONF_ID = "_conferencia_geral";
 const CONCURRENCY = 3;
 
 /** Só pausa se BATIMENTO_PAUSED=1. O censo/diário já evita varredura cega. */
@@ -130,6 +134,74 @@ async function siengeFetch(url, retries = 4) {
     }
   }
   throw last;
+}
+
+/** Mesma chamada do navegador (siengeFetchWithRetry): caminho relativo e erro com err.status, que a conferência usa (404, 507). */
+async function siengeFetchPath(pathArg, retries) {
+  const p = String(pathArg || "");
+  const url = (p.startsWith("/bulk-data/") ? SIENGE_BULK_BASE : SIENGE_API_BASE) + p;
+  const tries = Math.max(1, Number(retries) || 3);
+  let last;
+  for (let i = 0; i < tries; i++) {
+    let res;
+    try {
+      res = await fetch(url, { headers: { Authorization: SIENGE_AUTH, Accept: "application/json" } });
+    } catch (e) {
+      last = e;
+      if (i < tries - 1) await sleep(1500 * (i + 1));
+      continue;
+    }
+    if (res.ok) {
+      const text = await res.text();
+      return text ? JSON.parse(text) : {};
+    }
+    const err = new Error(`Sienge ${res.status}`);
+    err.status = res.status;
+    last = err;
+    if ((res.status === 429 || (res.status >= 500 && res.status !== 507)) && i < tries - 1) {
+      await sleep(Math.min(3000 * 2 ** i, 15000));
+      continue;
+    }
+    throw err;
+  }
+  throw last;
+}
+
+let ccCache = { date: "", list: [] };
+/** Centros de custo do Sienge (nome de cada um, para achar o rateio). Uma consulta por dia em cada instância. */
+async function loadCostCenters(today) {
+  if (ccCache.date === today && ccCache.list.length) return ccCache.list;
+  const list = [];
+  for (let offset = 0; offset < 10000; offset += 200) {
+    const res = await siengeFetchPath(`/cost-centers?limit=200&offset=${offset}`, 3);
+    const rows = (res && res.results) || [];
+    list.push(...rows);
+    if (rows.length < 200) break;
+  }
+  ccCache = { date: today, list };
+  return list;
+}
+
+/** Relatório da conferência geral (Sienge × Integra por empreendimento). A tela lê este documento. */
+async function loadConferenciaGeral(today) {
+  const vazio = { date: today, at: new Date().toISOString(), ccs: [], falhas: [], interrompido: false, rodando: true, origem: "batimento" };
+  try {
+    const snap = await getDoc(doc(db, FB_COL, CONF_ID));
+    const data = snap.exists() ? (snap.data() || {}) : null;
+    if (!data || data.date !== today || !Array.isArray(data.ccs)) return vazio;
+    return { ...vazio, ...data, falhas: Array.isArray(data.falhas) ? data.falhas.map(String) : [] };
+  } catch (e) {
+    return vazio;
+  }
+}
+
+async function saveConferenciaGeral(geral) {
+  let out = semVazio(geral);
+  // Firestore aceita até 1 MiB por documento. Se as listas de detalhe passarem disso, ficam só os totais.
+  if (JSON.stringify(out).length > 800000) {
+    out = { ...out, ccs: out.ccs.map((c) => ({ ...c, titulosSemUnidade: [], unidadesSemTitulo: [] })), detalheCortado: true };
+  }
+  await setDoc(doc(db, FB_COL, CONF_ID), out);
 }
 
 async function loadUnits() {
@@ -660,12 +732,29 @@ async function handler(req, res) {
     let processed = Number(state.processed) || 0;
     let failed = Number(state.failed) || 0;
     let obrasFeitas = 0;
-    const obrasAtivas = [...new Set(units
-      .filter((u) => isFinanceUnit(u) && !isSettledUnit(u))
-      .map((u) => String(u.enterpriseId || ""))
-      .filter(Boolean))].sort((a, b) => Number(a) - Number(b));
+    // Conferência completa (a mesma do botão da tela). Se não carregar, segue com a conferência simples de antes.
+    let conferencia = null;
+    try {
+      // A lista de empreendimentos é a da tela: inclui centros sem unidade (títulos sem unidade aparecem no relatório).
+      let centros = [];
+      try {
+        centros = await loadCostCenters(today);
+      } catch (e) {
+        log.push(`centros de custo indisponíveis: ${(e && e.message) || e}`);
+      }
+      conferencia = criarConferencia({ units, enterprises: centros, siengeFetch: siengeFetchPath });
+    } catch (e) {
+      log.push(`conferência completa indisponível, usando a simples: ${(e && e.message) || e}`);
+    }
+    const obrasAtivas = conferencia
+      ? conferencia.ids().map(String)
+      : [...new Set(units
+        .filter((u) => isFinanceUnit(u) && !isSettledUnit(u))
+        .map((u) => String(u.enterpriseId || ""))
+        .filter(Boolean))].sort((a, b) => Number(a) - Number(b));
     if (!Array.isArray(state.obrasVistas)) state.obrasVistas = [];
     const obrasVistas = new Set(state.obrasVistas.map(String));
+    let geral = null;
 
     if (censusQueue.length) {
       while (i < censusQueue.length && Date.now() - started < BUDGET_MS) {
@@ -690,20 +779,41 @@ async function handler(req, res) {
       }
     } else {
       const pendentes = obrasAtivas.filter((id) => !obrasVistas.has(id));
+      if (conferencia && pendentes.length) {
+        geral = await loadConferenciaGeral(today);
+        conferencia.setUnits([...byId.values()]);
+      }
       for (const ccId of pendentes) {
-        if (Date.now() - started >= BUDGET_MS) break;
+        // Um empreendimento grande leva até ~20s. Só começa outro se ainda couber antes dos 60s da Vercel.
+        if (Date.now() - started >= (conferencia ? CONF_START_MS : BUDGET_MS)) break;
         try {
-          const rows = await extratoDaObra(ccId);
-          const aplicado = aplicarExtratoObra([...byId.values()], rows, ccId);
-          aplicado.units.forEach((u) => {
-            if (u && u.id != null) byId.set(String(u.id), u);
-          });
+          if (conferencia) {
+            const linha = await conferencia.conferir(ccId);
+            let n = 0;
+            conferencia.units().forEach((u) => {
+              if (!u || u.id == null || String(u.enterpriseId) !== String(ccId)) return;
+              byId.set(String(u.id), u);
+              n += 1;
+            });
+            if (linha) {
+              geral.ccs = geral.ccs.filter((c) => String(c.ccId) !== String(ccId)).concat([linha]);
+              geral.falhas = geral.falhas.filter((id) => String(id) !== String(ccId));
+              log.push(`obra ${ccId}: conferida (${n} unidades, ${linha.semTitulo} sem título, ${linha.semUnidade.n} título(s) sem unidade, ${linha.reabertos} reaberta(s))`);
+            }
+            processed += n;
+          } else {
+            const rows = await extratoDaObra(ccId);
+            const aplicado = aplicarExtratoObra([...byId.values()], rows, ccId);
+            aplicado.units.forEach((u) => {
+              if (u && u.id != null) byId.set(String(u.id), u);
+            });
+            processed += aplicado.atualizadas;
+            log.push(`obra ${ccId}: ${aplicado.atualizadas} contratos, ${aplicado.semExtrato} sem título no extrato`);
+          }
           dirtyCc.add(String(ccId));
           obrasVistas.add(String(ccId));
           obrasFeitas += 1;
-          processed += aplicado.atualizadas;
           delete state.obraFalhas[String(ccId)];
-          log.push(`obra ${ccId}: ${aplicado.atualizadas} contratos, ${aplicado.semExtrato} sem título no extrato`);
         } catch (e) {
           failed += 1;
           const nFail = (Number(state.obraFalhas[String(ccId)]) || 0) + 1;
@@ -711,6 +821,7 @@ async function handler(req, res) {
           log.push(`obra ${ccId}: ${(e && e.message) || e}`);
           if (nFail >= 2) {
             obrasVistas.add(String(ccId));
+            if (geral && !geral.falhas.includes(String(ccId))) geral.falhas.push(String(ccId));
             log.push(`obra ${ccId}: segue sem ela depois de ${nFail} falhas, para o restante fechar`);
           }
         }
@@ -726,6 +837,16 @@ async function handler(req, res) {
     state.censusLeft = restCensus;
     state.fichaLeft = restObras;
     state.obrasLeft = restObras;
+    if (geral) {
+      geral.at = new Date().toISOString();
+      geral.rodando = restObras > 0;
+      geral.interrompido = false;
+      try {
+        await saveConferenciaGeral(geral);
+      } catch (e) {
+        log.push(`relatório da conferência não gravou: ${(e && e.message) || e}`);
+      }
+    }
 
     if (!Array.isArray(state.saldoSeen)) state.saldoSeen = [];
     if (!state.saldoFalhas || typeof state.saldoFalhas !== "object") state.saldoFalhas = {};
@@ -846,4 +967,6 @@ async function runDaily(maxPasses) {
 }
 
 handler.runDaily = runDaily;
+/** Só leitura, para conferir a conferência completa fora da Vercel. */
+handler.interno = { siengeFetchPath, loadCostCenters, loadUnits };
 module.exports = handler;

@@ -1,5 +1,10 @@
 const RegistroApp = {
   CHAVE: "crm_registro_cadastro_v1",
+  /**
+   * Volume na data da baixa: o recebido na data da quitação é pelo menos esta fração do total recebido no título.
+   * Na carteira, a quitação ou fica acima de 60% (pagamento de uma vez) ou abaixo de 10% (última parcela normal).
+   */
+  VOLUME_MIN: 0.10,
 
   state: {
     linhas: [],
@@ -269,6 +274,9 @@ const RegistroApp = {
           m: 0,
           vazio: 0,
           fora: 0,
+          fin: 0,
+          prop: 0,
+          conf: 0,
           itens: []
         };
         grupos.set(key, g);
@@ -278,14 +286,40 @@ const RegistroApp = {
       else if (letra === "M") g.m += 1;
       else g.vazio += 1;
       if (!hit) g.fora += 1;
+      const rec = this.recebidoNaQuitacao(u);
+      const origem = letra === "F" ? (rec.volume ? "fin" : "conf") : "prop";
+      g[origem] += 1;
       g.itens.push({
         unidade: u.name || (hit && hit.unidade) || "—",
         quando: iso,
         letra: letra,
-        fora: !hit
+        fora: !hit,
+        valor: rec.valor,
+        pct: rec.pct,
+        origem: origem
       });
     });
     return { grupos: [...grupos.values()], semData: semData };
+  },
+
+  /** Valor recebido na data da quitação (gravado pelo batimento do estoque) e a fração do total recebido. */
+  recebidoNaQuitacao(u) {
+    if (!u || u.quitacaoValor == null) return { valor: null, pct: null, volume: false };
+    const valor = Number(u.quitacaoValor) || 0;
+    const total = Number(u.quitacaoRecebido) || 0;
+    const pct = total > 0.009 ? valor / total : null;
+    return { valor, pct, volume: pct != null && pct >= this.VOLUME_MIN };
+  },
+
+  origemTexto(item) {
+    if (item.origem === "fin") return "Financiamento";
+    if (item.origem === "prop") return "Recursos próprios";
+    return item.valor == null ? "Conferir · sem valor da baixa" : "Conferir · F sem volume na baixa";
+  },
+
+  moeda(v) {
+    if (v == null) return "—";
+    return Number(v).toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
   },
 
   ordenar(lista) {
@@ -445,7 +479,8 @@ const RegistroApp = {
       alert("A exportação para Excel não está disponível.");
       return;
     }
-    const aoa = [["Empresa", "Empreendimento", "Quitados", "Financiado", "Registrado", "Sem informação", "Fora do arquivo"]];
+    const aoa = [["Empresa", "Empreendimento", "Quitados", "Financiado", "Registrado", "Sem informação", "Fora do arquivo", "Financiamento", "Recursos próprios", "Conferir"]];
+    const unid = [["Empresa", "Empreendimento", "Unidade", "Quitação", "Situação", "Recebido na quitação", "% do recebido", "Origem"]];
     grupos.forEach((g) => {
       aoa.push([
         this.rotulo(g.empresaId, g.empresa),
@@ -454,12 +489,28 @@ const RegistroApp = {
         g.f,
         g.m,
         g.vazio,
-        g.fora
+        g.fora,
+        g.fin,
+        g.prop,
+        g.conf
       ]);
+      (g.itens || []).forEach((it) => {
+        unid.push([
+          this.rotulo(g.empresaId, g.empresa),
+          this.rotulo(g.obraId, g.obra),
+          it.unidade,
+          this.dataBr(it.quando),
+          this.situacao(it),
+          it.valor == null ? "" : it.valor,
+          it.pct == null ? "" : Math.round(it.pct * 100) / 100,
+          this.origemTexto(it)
+        ]);
+      });
     });
     const ws = XLSX.utils.aoa_to_sheet(aoa);
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, "Registro");
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(unid), "Unidades");
     const anos = this.anosAtivos().join("-");
     XLSX.writeFile(wb, "registro-quitados-" + anos + ".xlsx");
   },
@@ -481,8 +532,12 @@ const RegistroApp = {
       a.m += g.m;
       a.vazio += g.vazio;
       a.fora += g.fora;
+      a.fin += g.fin;
+      a.prop += g.prop;
+      a.conf += g.conf;
       return a;
-    }, { quitados: 0, f: 0, m: 0, vazio: 0, fora: 0 });
+    }, { quitados: 0, f: 0, m: 0, vazio: 0, fora: 0, fin: 0, prop: 0, conf: 0 });
+    const pctMin = Math.round(this.VOLUME_MIN * 100);
     const obrasArq = new Set(linhas.map((l) => l.obraId)).size;
     const quando = this.state.quando ? this.dataBr(this.state.quando.slice(0, 10)) : "";
     const meta = pos.meta || {};
@@ -516,6 +571,11 @@ const RegistroApp = {
           <div class="est-fin-card"><label>Registrado</label><strong>${this.n(tot.m)}</strong><small>Letra M no número do registro</small></div>
           <div class="est-fin-card is-warn"><label>Sem informação</label><strong>${this.n(tot.vazio)}</strong><small>${tot.fora ? this.n(tot.fora) + " não estão no arquivo" : "C, vazio ou ausente no arquivo"}</small></div>
         </div>
+        <div class="est-stock-finance" style="margin-bottom:12px;">
+          <div class="est-fin-card is-ok"><label>Quitado com financiamento</label><strong>${this.n(tot.fin)}</strong><small>Letra F e ao menos ${pctMin}% do recebido na data da quitação</small></div>
+          <div class="est-fin-card"><label>Quitado com recursos próprios</label><strong>${this.n(tot.prop)}</strong><small>Quitação sem a letra F</small></div>
+          <div class="est-fin-card is-warn"><label>Conferir</label><strong>${this.n(tot.conf)}</strong><small>Letra F sem volume na data da quitação</small></div>
+        </div>
         <div class="cc-scroll">
           <table class="cc-table">
             <thead><tr>
@@ -525,15 +585,18 @@ const RegistroApp = {
               ${this.th("f", "Financiado")}
               ${this.th("m", "Registrado")}
               ${this.th("vazio", "Sem informação")}
+              ${this.th("fin", "Financiamento")}
+              ${this.th("prop", "Recursos próprios")}
+              ${this.th("conf", "Conferir")}
             </tr></thead>
             <tbody>
-              ${grupos.length ? grupos.map((g) => this.linhaHtml(g)).join("") : `<tr><td colspan="6" style="text-align:center;padding:24px;color:#64748b;">Nenhum lote quitado neste filtro.</td></tr>`}
+              ${grupos.length ? grupos.map((g) => this.linhaHtml(g)).join("") : `<tr><td colspan="9" style="text-align:center;padding:24px;color:#64748b;">Nenhum lote quitado neste filtro.</td></tr>`}
             </tbody>
           </table>
         </div>`);
     root.innerHTML = `
       <div class="cc-page">
-        <p style="margin:0 0 12px;color:#64748b;font-size:0.85rem;line-height:1.45;">Suba o relatório <strong>Unidades por Empreendimento (Dados Cadastrais)</strong> do Sienge. A letra no início de Número do registro classifica a unidade: <strong>F</strong> financiado, <strong>M</strong> registrado, <strong>C</strong> ou vazio sem informação. A contagem usa os lotes quitados da Posição de estoque.</p>
+        <p style="margin:0 0 12px;color:#64748b;font-size:0.85rem;line-height:1.45;">Suba o relatório <strong>Unidades por Empreendimento (Dados Cadastrais)</strong> do Sienge. A letra no início de Número do registro classifica a unidade: <strong>F</strong> financiado, <strong>M</strong> registrado, <strong>C</strong> ou vazio sem informação. A contagem usa os lotes quitados da Posição de estoque. A origem dos recursos olha o valor recebido na data da quitação: com <strong>F</strong> e volume na baixa é financiamento; quitação sem <strong>F</strong> é recursos próprios.</p>
         <div class="cc-toolbar">
           <div class="cc-filters">${filtro}</div>
           <div class="cc-toolbar-actions">
@@ -560,13 +623,15 @@ const RegistroApp = {
     const aberto = !!this.state.abertos[g.key];
     const fora = g.fora ? ` title="${this.n(g.fora)} não estão no arquivo"` : "";
     const itens = (g.itens || []).slice().sort((a, b) => String(a.unidade).localeCompare(String(b.unidade), "pt", { numeric: true }));
-    const det = aberto ? `<tr><td colspan="6" style="background:#f8fafc;">
+    const det = aberto ? `<tr><td colspan="9" style="background:#f8fafc;">
       <table class="cc-table" style="margin:4px 0;">
-        <thead><tr><th>Unidade</th><th>Quitação</th><th>Situação</th></tr></thead>
+        <thead><tr><th>Unidade</th><th>Quitação</th><th>Situação</th><th>Recebido na quitação</th><th>Origem</th></tr></thead>
         <tbody>${itens.map((it) => `<tr>
           <td>${this.esc(it.unidade)}</td>
           <td>${this.esc(this.dataBr(it.quando))}</td>
           <td>${this.esc(this.situacao(it))}</td>
+          <td>${this.esc(this.moeda(it.valor))}${it.pct != null ? ` <small style="color:#64748b;">(${Math.round(it.pct * 100)}% do recebido)</small>` : ""}</td>
+          <td>${this.esc(this.origemTexto(it))}</td>
         </tr>`).join("")}</tbody>
       </table>
     </td></tr>` : "";
@@ -577,6 +642,9 @@ const RegistroApp = {
       <td class="is-center">${this.n(g.f)}</td>
       <td class="is-center">${this.n(g.m)}</td>
       <td class="is-center"${fora}>${this.n(g.vazio)}</td>
+      <td class="is-center">${this.n(g.fin)}</td>
+      <td class="is-center">${this.n(g.prop)}</td>
+      <td class="is-center">${this.n(g.conf)}</td>
     </tr>${det}`;
   },
 
