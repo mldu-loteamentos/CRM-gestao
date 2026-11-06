@@ -300,9 +300,12 @@ const OrcamentoForecastApp = {
     const mapa = window.ORCAMENTO_ORIGEM_2027 || {};
     const o = mapa[linha.e + "|" + linha.cc + "|" + linha.conta] || {};
     const vend = Array.isArray(o.vm) ? o.vm.map((v) => this.num(v)) : this.z();
-    const servico = String(linha.conta || "").indexOf("1.02") === 0 || (typeof OrcEst !== "undefined" && OrcEst.grupoEfetivo && OrcEst.grupoEfetivo(linha.conta, linha.nome) === "g_01_02");
-    const serv = servico ? total.slice() : this.z();
-    const cart = total.map((v, i) => servico ? 0 : this.num(v) - this.num(vend[i]));
+    const classificado = !!(o.cart || o.vend || o.serv || o.ant || o.cm || o.vm || o.sm);
+    const servico = classificado
+      ? !!(o.serv || (Array.isArray(o.sm) && o.sm.some((v) => Math.abs(this.num(v)) > 0.004)))
+      : (String(linha.conta || "").indexOf("1.02") === 0 || (typeof OrcEst !== "undefined" && OrcEst.grupoEfetivo && OrcEst.grupoEfetivo(linha.conta, linha.nome) === "g_01_02"));
+    const serv = servico ? (Array.isArray(o.sm) ? o.sm.map((v) => this.num(v)) : total.slice()) : this.z();
+    const cart = servico ? this.z() : (Array.isArray(o.cm) ? o.cm.map((v) => this.num(v)) : total.map((v, i) => this.num(v) - this.num(vend[i])));
     return { cart: cart, vend: vend, ant: this.z(), serv: serv };
   },
 

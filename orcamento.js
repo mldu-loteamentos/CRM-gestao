@@ -83,6 +83,145 @@ const OrcamentoApp = {
       if (this.carteiraCompanies[id] === "error") delete this.carteiraCompanies[id];
     });
     this.render();
+    this.garantirCaixa();
+  },
+
+  forecastIndex() {
+    return this._outubroRealizado ? 10 : 9;
+  },
+
+  async garantirCaixa() {
+    if (this._caixaPedido) return;
+    this._caixaPedido = true;
+    const rc = window.ResultadoCaixaApp;
+    if (!rc) return;
+    try {
+      if (typeof rc.carregarNuvem === "function" && !rc.temAcervo()) await rc.carregarNuvem();
+      else if (typeof rc.carregarForecasts === "function" && !Object.keys(rc.forecasts || {}).length) await rc.carregarForecasts();
+    } catch (e) {}
+    if (this.aplicarCaixa()) this.render();
+  },
+
+  aplicarCaixa() {
+    const rc = window.ResultadoCaixaApp;
+    const base = window.ORCAMENTO_RECEITA_2026;
+    if (!rc || !base || !Array.isArray(base.lines) || this._caixaAplicado) return false;
+    const real = this.realizadoCaixa(rc);
+    const fc = this.forecastCaixa(rc);
+    if (!real.map.size && !fc.size) return false;
+    const corte = real.outubro ? 10 : 9;
+    this._outubroRealizado = corte === 10;
+    const chave = (e, cc, conta) => String(e) + "|" + String(cc).replace(/\D/g, "") + "|" + String(conta || "");
+    const aplicar = (line, r, f) => {
+      const m = (line.m || []).slice(0, 12);
+      while (m.length < 12) m.push(0);
+      if (r) r.forEach((v, i) => { if (v != null && i < corte) m[i] = v; });
+      if (f) f.forEach((v, i) => { if (v != null && i >= corte) m[i] = v; });
+      line.m = m;
+    };
+    const vistos = new Set();
+    base.lines.forEach((line) => {
+      const k = chave(line.e, line.cc, line.conta);
+      vistos.add(k);
+      aplicar(line, real.map.get(k), fc.get(k));
+    });
+    fc.forEach((f, k) => {
+      if (vistos.has(k)) return;
+      const r = real.map.get(k);
+      if (!r && !f) return;
+      const partes = k.split("|");
+      const line = { e: partes[0], cc: partes[1], cn: real.nomes.get(k) || "", conta: partes[2], nome: "", m: Array(12).fill(0) };
+      aplicar(line, r, f);
+      base.lines.push(line);
+      vistos.add(k);
+    });
+    real.map.forEach((r, k) => {
+      if (vistos.has(k)) return;
+      const partes = k.split("|");
+      const line = { e: partes[0], cc: partes[1], cn: real.nomes.get(k) || "", conta: partes[2], nome: "", m: Array(12).fill(0) };
+      aplicar(line, r, null);
+      base.lines.push(line);
+    });
+    this._caixaAplicado = true;
+    return true;
+  },
+
+  realizadoCaixa(rc) {
+    const map = new Map();
+    const nomes = new Map();
+    let outubro = false;
+    const meses = (rc.acervo && rc.acervo.meses) || {};
+    const slots = Object.keys(meses).filter((k) => k.slice(0, 4) === "2026" && k <= "2026-10").sort();
+    const ultimo = new Map();
+    slots.forEach((slot) => {
+      const mes = Number(slot.slice(5, 7));
+      const arquivos = (meses[slot] && meses[slot].arquivos) || {};
+      Object.keys(arquivos).forEach((nome) => {
+        const arq = arquivos[nome];
+        if (!arq) return;
+        const emp = String(arq.empresa || (typeof rc.empresaId === "function" ? rc.empresaId(nome) : "") || "");
+        if (!emp || emp === "0") return;
+        ultimo.set(emp, { arq: arq, mes: mes });
+      });
+    });
+    ultimo.forEach((info, emp) => {
+      if (info.mes >= 10) outubro = true;
+      const blocos = info.arq.planosPorCc && Object.keys(info.arq.planosPorCc).length
+        ? info.arq.planosPorCc
+        : (info.arq.contasPorCc || {});
+      Object.keys(blocos).forEach((cc) => {
+        const contas = (blocos[cc] && blocos[cc].contas) || {};
+        const ccId = String(cc).replace(/\D/g, "") || String(cc);
+        Object.keys(contas).forEach((code) => {
+          const conta = typeof rc.codigoPlano === "function" ? rc.codigoPlano(code) : code;
+          if (!/^\d\.\d{2}/.test(String(conta))) return;
+          const key = emp + "|" + ccId + "|" + conta;
+          const row = map.get(key) || Array(12).fill(null);
+          const bag = (contas[code] && contas[code].meses) || {};
+          for (let mm = 1; mm <= info.mes && mm <= 10; mm++) {
+            const cel = bag[String(mm)] || bag[String(mm).padStart(2, "0")];
+            if (!cel) continue;
+            const v = Number(cel.r);
+            if (!Number.isFinite(v)) continue;
+            row[mm - 1] = v;
+          }
+          map.set(key, row);
+          if (blocos[cc] && blocos[cc].nome) nomes.set(key, blocos[cc].nome);
+        });
+      });
+    });
+    return { map: map, nomes: nomes, outubro: outubro };
+  },
+
+  forecastCaixa(rc) {
+    const map = new Map();
+    const docs = rc.forecasts || {};
+    const yms = Object.keys(docs).filter((ym) => ym.slice(0, 4) === "2026").sort();
+    yms.forEach((ym) => {
+      const doc = docs[ym];
+      if (!doc) return;
+      const mes = Number(ym.slice(5, 7)) - 1;
+      if (mes < 0 || mes > 11) return;
+      const por = doc.porArquivo || {};
+      Object.keys(por).forEach((nome) => {
+        const arq = por[nome] || {};
+        const emp = String(arq.empresa || (typeof rc.empresaId === "function" ? rc.empresaId(nome) : "") || "");
+        if (!emp || emp === "0") return;
+        Object.keys(arq.contas || {}).forEach((cc) => {
+          const ccId = String(cc).replace(/\D/g, "") || String(cc);
+          Object.keys(arq.contas[cc] || {}).forEach((code) => {
+            const conta = typeof rc.codigoPlano === "function" ? rc.codigoPlano(code) : code;
+            if (!/^\d\.\d{2}/.test(String(conta))) return;
+            const key = emp + "|" + ccId + "|" + conta;
+            const row = map.get(key) || Array(12).fill(null);
+            const valor = Number(((arq.contas[cc][code] || {}).meses || {})[ym]);
+            if (Number.isFinite(valor)) row[mes] = valor;
+            map.set(key, row);
+          });
+        });
+      });
+    });
+    return map;
   },
 
   restoreCarteira() {
@@ -280,7 +419,7 @@ const OrcamentoApp = {
       <div class="orc-head">
         <div>
           <h2>Orçamento 2026 × 2027</h2>
-          <p>Empresa, centro de custo e a conta do plano. Em 2026, janeiro a setembro é o recebido e outubro a dezembro é forecast. Em 2027, carteira, novas vendas e serviços aparecem separados. Serviços é a receita de prestação de serviços (contas 1.02). Na empresa 3, a administração de carteira de recebíveis entra como venda de lotes. Valor Moura Leite aplica o % Consolidação de cada empresa.</p>
+          <p id="orc-lead">Empresa, centro de custo e a conta do plano. ${this.textoAno()}</p>
         </div>
       </div>
       <div class="orc-tools">
@@ -317,9 +456,9 @@ const OrcamentoApp = {
               ${this.periodCols(2027).map((col, i) => `<th class="orc-h27${i === 0 ? " orc-split" : ""}">${this.esc(col.label)}</th>`).join("")}
               <th class="orc-split">Total 2026</th>
               <th>Total 2027</th>
-              <th title="Parcela do orçado 2027 marcada como carteira na observação">Carteira</th>
-              <th title="Parcela do orçado 2027 marcada como vendas na observação">Novas vendas</th>
-              <th title="Receita de prestação de serviços em 2027">Serviços</th>
+              <th title="Observação Carteira na base de 2027">Carteira</th>
+              <th title="Observação Vendas na base de 2027">Novas vendas</th>
+              <th title="Observação Serviço na base de 2027">Serviços</th>
               <th title="Total 2027 − Total 2026">Variação</th>
               <th title="Total 2027 − Total 2026">Variação %</th>
               <th class="orc-split" title="Carteira em aberto em 2027, sem sub judice">Sienge 2027</th>
@@ -498,13 +637,22 @@ const OrcamentoApp = {
     });
   },
 
+  textoAno() {
+    const out = this.forecastIndex() >= 10;
+    const faixa = out
+      ? "Em 2026, janeiro a outubro é o recebido e novembro a dezembro é o forecast mais novo do Resultado de caixa."
+      : "Em 2026, janeiro a setembro é o recebido e outubro a dezembro é o forecast mais novo do Resultado de caixa.";
+    return faixa + " Em 2027, a observação da base separa carteira, novas vendas, antecipação, serviços, lucros recebidos e aportes. Valor Moura Leite aplica o % Consolidação de cada empresa.";
+  },
+
   periodCols(year) {
     const months = this.months();
+    const corte = this.forecastIndex();
     if (!this.quarterView) {
       return months.map((m, i) => ({
-        label: m + (year === 2026 && i >= 9 ? "*" : ""),
+        label: m + (year === 2026 && i >= corte ? "*" : ""),
         indexes: [i],
-        forecast: year === 2026 && i >= 9
+        forecast: year === 2026 && i >= corte
       }));
     }
     return ["1º tri", "2º tri", "3º tri", "4º tri"].map((label, q) => ({
@@ -760,7 +908,7 @@ const OrcamentoApp = {
       + '<tr class="orc-cart-total"><td>Total</td><td>' + this.money(this.sum(row.m26))
       + "</td><td>" + this.money(Number(row.cart) || 0)
       + "</td><td>" + this.money(sum.receber) + "</td></tr></tbody></table>"
-      + '<div class="orc-cart-note">out–dez de 2026 são forecast. Carteira 2027 é o orçado marcado como carteira, sem novas vendas. Sienge é a carteira em aberto, sem sub judice.</div>';
+      + '<div class="orc-cart-note">' + (this.forecastIndex() >= 10 ? "nov–dez" : "out–dez") + ' de 2026 são forecast. Carteira 2027 é o orçado marcado como carteira na observação. Sienge é a carteira em aberto, sem sub judice.</div>';
   },
 
   vendTipHtml(row) {
@@ -887,6 +1035,9 @@ const OrcamentoApp = {
           vm: this.blank(),
           serv: 0,
           sm: this.blank(),
+          ant: 0,
+          lucro: 0,
+          aporte: 0,
           notas: ""
         };
         map.set(key, row);
@@ -904,21 +1055,32 @@ const OrcamentoApp = {
       if (row._origem) return;
       const o = this.origemDe(line);
       if (!o) return;
-      row.cart = this.signed(line.conta, o.cart);
-      row.vend = this.signed(line.conta, o.vend);
-      if (Array.isArray(o.cm)) row.cm = o.cm.map((v) => this.signed(line.conta, v));
-      if (Array.isArray(o.vm)) row.vm = o.vm.map((v) => this.signed(line.conta, v));
-      row.notas = (o.notas || []).join(" · ");
+      const meses = (arr) => (Array.isArray(arr) ? arr.map((v) => this.signed(line.conta, v)) : null);
+      if (o.cart || Array.isArray(o.cm)) {
+        row.cart = this.signed(line.conta, o.cart);
+        const cm = meses(o.cm);
+        if (cm) row.cm = cm;
+      }
+      if (o.vend || Array.isArray(o.vm)) {
+        row.vend = this.signed(line.conta, o.vend);
+        const vm = meses(o.vm);
+        if (vm) row.vm = vm;
+      }
+      if (o.serv || Array.isArray(o.sm)) {
+        row.serv = this.signed(line.conta, o.serv);
+        const sm = meses(o.sm);
+        if (sm) row.sm = sm;
+      }
+      if (o.ant) row.ant = this.signed(line.conta, o.ant);
+      if (o.lucro) row.lucro = this.signed(line.conta, o.lucro);
+      if (o.aporte) row.aporte = this.signed(line.conta, o.aporte);
+      row.notas = [o.cart ? "Carteira" : "", o.vend ? "Vendas" : "", o.ant ? "Antecipação" : "", o.serv ? "Serviço" : "", o.lucro ? "Lucros recebidos" : "", o.aporte ? "Aporte recebido" : ""].filter(Boolean).join(" · ");
       row._origem = true;
     });
     map.forEach((row) => {
-      if (!this.isServicoConta(row.conta, row.e)) return;
+      if (row._origem || !this.isServicoConta(row.conta, row.e)) return;
       row.serv = this.sum(row.m27);
       row.sm = row.m27.slice();
-      row.cart = 0;
-      row.cm = this.blank();
-      row.vend = 0;
-      row.vm = this.blank();
     });
     (this.received().lines || []).forEach((line) => {
       const row = touch(line);
@@ -1054,6 +1216,9 @@ const OrcamentoApp = {
             vm: this.blank(),
             serv: 0,
             sm: this.blank(),
+            ant: 0,
+            lucro: 0,
+            aporte: 0,
             leaf: false,
             children: new Map()
           });
@@ -1067,6 +1232,9 @@ const OrcamentoApp = {
         (acc.vm || []).forEach((v, i) => { child.vm[i] += Number(v) || 0; });
         child.serv += Number(acc.serv) || 0;
         (acc.sm || []).forEach((v, i) => { child.sm[i] += Number(v) || 0; });
+        child.ant += Number(acc.ant) || 0;
+        child.lucro += Number(acc.lucro) || 0;
+        child.aporte += Number(acc.aporte) || 0;
         if (idx === parts.length - 1) child.leaf = true;
         node = child;
       });
@@ -1116,6 +1284,9 @@ const OrcamentoApp = {
     let yCart = 0;
     let yVend = 0;
     let yServ = 0;
+    let yAnt = 0;
+    let yLucro = 0;
+    let yAporte = 0;
     companies.forEach((emp) => {
       const e26 = this.blank();
       const e27 = this.blank();
@@ -1124,6 +1295,9 @@ const OrcamentoApp = {
       let eCart = 0;
       let eVend = 0;
       let eServ = 0;
+      let eAnt = 0;
+      let eLucro = 0;
+      let eAporte = 0;
       emp.costCenters.forEach((cc) => {
         this.sumNode(cc.tree, "m26").forEach((v, i) => { e26[i] += v; });
         this.sumNode(cc.tree, "m27").forEach((v, i) => { e27[i] += v; });
@@ -1132,6 +1306,9 @@ const OrcamentoApp = {
         eCart += this.sumScalar(cc.tree, "cart");
         eVend += this.sumScalar(cc.tree, "vend");
         eServ += this.sumScalar(cc.tree, "serv");
+        eAnt += this.sumScalar(cc.tree, "ant");
+        eLucro += this.sumScalar(cc.tree, "lucro");
+        eAporte += this.sumScalar(cc.tree, "aporte");
       });
       const factor = this.shareFactor(emp.e);
       const se26 = this.scaleMonths(e26, factor);
@@ -1141,6 +1318,9 @@ const OrcamentoApp = {
       const seCart = eCart * factor;
       const seVend = eVend * factor;
       const seServ = eServ * factor;
+      const seAnt = eAnt * factor;
+      const seLucro = eLucro * factor;
+      const seAporte = eAporte * factor;
       se26.forEach((v, i) => { y26[i] += v; });
       se27.forEach((v, i) => { y27[i] += v; });
       seVm.forEach((v, i) => { yVm[i] += v; });
@@ -1148,6 +1328,9 @@ const OrcamentoApp = {
       yCart += seCart;
       yVend += seVend;
       yServ += seServ;
+      yAnt += seAnt;
+      yLucro += seLucro;
+      yAporte += seAporte;
       const shareNote = this.mouraView ? (" · " + this.participation(emp.e).toLocaleString("pt-BR") + "% ML") : "";
       rows.push({
         kind: "emp",
@@ -1165,6 +1348,9 @@ const OrcamentoApp = {
         vend: seVend,
         vm: seVm,
         serv: seServ,
+        ant: seAnt,
+        lucro: seLucro,
+        aporte: seAporte,
         expandable: true,
         parentEmp: "",
         parentObra: "",
@@ -1187,6 +1373,9 @@ const OrcamentoApp = {
           vend: this.sumScalar(cc.tree, "vend") * factor,
           vm: this.scaleMonths(this.sumNode(cc.tree, "vm"), factor),
           serv: this.sumScalar(cc.tree, "serv") * factor,
+          ant: this.sumScalar(cc.tree, "ant") * factor,
+          lucro: this.sumScalar(cc.tree, "lucro") * factor,
+          aporte: this.sumScalar(cc.tree, "aporte") * factor,
           expandable: true,
           parentEmp: emp.key,
           parentObra: parentObra,
@@ -1207,6 +1396,9 @@ const OrcamentoApp = {
             vend: (Number(acc.vend) || 0) * factor,
             vm: this.scaleMonths(acc.vm, factor),
             serv: (Number(acc.serv) || 0) * factor,
+            ant: (Number(acc.ant) || 0) * factor,
+            lucro: (Number(acc.lucro) || 0) * factor,
+            aporte: (Number(acc.aporte) || 0) * factor,
             expandable: false,
             parentEmp: emp.key,
             parentObra: parentObra,
@@ -1226,6 +1418,9 @@ const OrcamentoApp = {
         let gCart = 0;
         let gVend = 0;
         let gServ = 0;
+        let gAnt = 0;
+        let gLucro = 0;
+        let gAporte = 0;
         item.centers.forEach((cc) => {
           this.sumNode(cc.tree, "m26").forEach((v, i) => { g26[i] += v; });
           this.sumNode(cc.tree, "m27").forEach((v, i) => { g27[i] += v; });
@@ -1234,6 +1429,9 @@ const OrcamentoApp = {
           gCart += this.sumScalar(cc.tree, "cart");
           gVend += this.sumScalar(cc.tree, "vend");
           gServ += this.sumScalar(cc.tree, "serv");
+          gAnt += this.sumScalar(cc.tree, "ant");
+          gLucro += this.sumScalar(cc.tree, "lucro");
+          gAporte += this.sumScalar(cc.tree, "aporte");
         });
         rows.push({
           kind: "obra",
@@ -1251,6 +1449,9 @@ const OrcamentoApp = {
           vend: gVend * factor,
           vm: this.scaleMonths(gVm, factor),
           serv: gServ * factor,
+          ant: gAnt * factor,
+          lucro: gLucro * factor,
+          aporte: gAporte * factor,
           expandable: true,
           parentEmp: emp.key,
           parentObra: "",
@@ -1281,13 +1482,16 @@ const OrcamentoApp = {
         vend: yVend,
         vm: yVm,
         serv: yServ,
+        ant: yAnt,
+        lucro: yLucro,
+        aporte: yAporte,
         expandable: false,
         parentEmp: "",
         parentObra: "",
         parentCc: ""
       });
     }
-    return { companies, rows, y26, y27, yCart, yVend, yServ };
+    return { companies, rows, y26, y27, yCart, yVend, yServ, yAnt, yLucro, yAporte };
   },
 
   rowVisible(row) {
@@ -1316,8 +1520,11 @@ const OrcamentoApp = {
     if (kpis) {
       const y26 = data.y26;
       const y27 = data.y27;
-      const rec = this.sum(y26.slice(0, 9));
-      const fc = this.sum(y26.slice(9));
+      const corte = this.forecastIndex();
+      const rec = this.sum(y26.slice(0, corte));
+      const fc = this.sum(y26.slice(corte));
+      const recRotulo = corte >= 10 ? "RECEBIDO JAN–OUT" : "RECEBIDO JAN–SET";
+      const fcRotulo = corte >= 10 ? "FORECAST NOV–DEZ" : "FORECAST OUT–DEZ";
       const t26 = this.sum(y26);
       const t27 = this.sum(y27);
       const delta = t27 - t26;
@@ -1326,8 +1533,8 @@ const OrcamentoApp = {
           <div class="orc-kpi-year">2026</div>
           <div class="orc-kpis">
             <div class="orc-kpi"><span>EMPRESAS</span><strong>${data.companies.length}</strong></div>
-            <div class="orc-kpi"><span>RECEBIDO JAN–SET</span><strong>${this.money(rec)}</strong></div>
-            <div class="orc-kpi"><span>FORECAST OUT–DEZ</span><strong class="orc-fc">${this.money(fc)}</strong></div>
+            <div class="orc-kpi"><span>${recRotulo}</span><strong>${this.money(rec)}</strong></div>
+            <div class="orc-kpi"><span>${fcRotulo}</span><strong class="orc-fc">${this.money(fc)}</strong></div>
             <div class="orc-kpi"><span>ANO COMPLETO</span><strong>${this.money(t26)}</strong></div>
           </div>
         </div>
@@ -1338,6 +1545,9 @@ const OrcamentoApp = {
             <div class="orc-kpi orc-kpi-cart"><span>CARTEIRA</span><strong class="orc-cart-col">${this.money(data.yCart)}</strong></div>
             <div class="orc-kpi orc-kpi-vend"><span>NOVAS VENDAS</span><strong class="orc-vend-col">${this.money(data.yVend)}</strong></div>
             <div class="orc-kpi orc-kpi-serv"><span>SERVIÇOS</span><strong class="orc-serv-col">${this.money(data.yServ)}</strong></div>
+            <div class="orc-kpi"><span>ANTECIPAÇÃO</span><strong>${this.money(data.yAnt)}</strong></div>
+            <div class="orc-kpi"><span>LUCROS RECEBIDOS</span><strong>${this.money(data.yLucro)}</strong></div>
+            <div class="orc-kpi"><span>APORTES</span><strong>${this.money(data.yAporte)}</strong></div>
             <div class="orc-kpi"><span>VARIAÇÃO</span><strong class="${delta < 0 ? "orc-neg" : ""}">${this.money(delta)} <span class="orc-pct">${this.pctLabel(delta, t26)}</span></strong></div>
           </div>
         </div>
@@ -1358,7 +1568,10 @@ const OrcamentoApp = {
     const bits = [];
     if (row.cart) bits.push('<span class="orc-tag orc-tag-cart">Carteira</span>');
     if (row.vend) bits.push('<span class="orc-tag orc-tag-vend">Novas vendas</span>');
+    if (row.ant) bits.push('<span class="orc-tag orc-tag-vend">Antecipação</span>');
     if (row.serv) bits.push('<span class="orc-tag orc-tag-serv">Serviços</span>');
+    if (row.lucro) bits.push('<span class="orc-tag orc-tag-serv">Lucros recebidos</span>');
+    if (row.aporte) bits.push('<span class="orc-tag orc-tag-cart">Aporte recebido</span>');
     if (row.notas) bits.push('<span class="orc-sub">' + this.esc(row.notas) + "</span>");
     return bits.length ? '<span class="orc-origem">' + bits.join("") + "</span>" : "";
   },
@@ -1522,13 +1735,16 @@ const OrcamentoApp = {
     const delta = t27 - t26;
     const kpis = [
       { label: "Empresas", value: data.companies.length, color: "FF0F172A", money: false },
-      { label: "Recebido jan–set 2026", value: this.sum(y26.slice(0, 9)), color: "FF0F172A", money: true },
-      { label: "Forecast out–dez 2026", value: this.sum(y26.slice(9)), color: "FF9A3412", money: true },
+      { label: (this.forecastIndex() >= 10 ? "Recebido jan–out 2026" : "Recebido jan–set 2026"), value: this.sum(y26.slice(0, this.forecastIndex())), color: "FF0F172A", money: true },
+      { label: (this.forecastIndex() >= 10 ? "Forecast nov–dez 2026" : "Forecast out–dez 2026"), value: this.sum(y26.slice(this.forecastIndex())), color: "FF9A3412", money: true },
       { label: "2026 completo", value: t26, color: "FF0F172A", money: true },
       { label: "Orçado 2027", value: t27, color: "FF105436", money: true },
       { label: "Carteira", value: data.yCart, color: "FF1E3A8A", money: true },
       { label: "Novas vendas", value: data.yVend, color: "FFC2410C", money: true },
       { label: "Serviços", value: data.yServ, color: "FF0F766E", money: true },
+      { label: "Antecipação", value: data.yAnt, color: "FF9A3412", money: true },
+      { label: "Lucros recebidos", value: data.yLucro, color: "FF0F172A", money: true },
+      { label: "Aportes", value: data.yAporte, color: "FF0F172A", money: true },
       { label: "Variação", value: delta, color: delta < 0 ? "FFB91C1C" : "FF105436", money: true }
     ];
     kpis.forEach((k, i) => {
