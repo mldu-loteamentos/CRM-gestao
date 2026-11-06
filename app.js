@@ -51235,6 +51235,47 @@ window.openAnexosClienteModal = async function(customerId) {
       if (typeof AnexosDB !== 'undefined') localFiles = await AnexosDB.load(customerId);
     } catch (e) {}
 
+    const [attPack, custPack] = await Promise.all([
+      SiengeApiService.getSalesContractAttachments
+        ? SiengeApiService.getSalesContractAttachments(mainC.id)
+        : Promise.resolve({ results: [] }),
+      SiengeApiService.getCustomerAttachments
+        ? SiengeApiService.getCustomerAttachments(customerId)
+        : Promise.resolve({ results: [] })
+    ]);
+    let allAttachments = ((attPack && attPack.results) || []).map((a) => ({
+      ...a, _sourceContractId: mainC.id
+    }));
+    allAttachments = allAttachments.concat(((custPack && custPack.results) || []).map((a) => ({
+      ...a, isCustomerAttachment: true, customerId: customerId
+    })));
+
+    const unit = ((mainC.salesContractUnits || mainC.units || [])[0]) || {};
+    let unitId = unit.id || unit.unitId || mainC.unitId || '';
+    const nomeUnidade = String(
+      unit.name || unit.unitName
+      || (document.getElementById('det-block-lot') && document.getElementById('det-block-lot').textContent)
+      || ''
+    ).trim();
+    const ccUnidade = mainC.enterpriseId || costCenterId || '';
+    if (!unitId && nomeUnidade && ccUnidade && SiengeApiService.findUnitByName) {
+      const achada = await SiengeApiService.findUnitByName(ccUnidade, nomeUnidade);
+      if (achada && achada.id) unitId = achada.id;
+    }
+    if (!unitId && typeof window.anexosFindSiengeUnitId === 'function') {
+      try { unitId = await window.anexosFindSiengeUnitId(mainC, ccUnidade, nomeUnidade); } catch (e) {}
+    }
+    if (unitId && SiengeApiService.getUnitAttachments) {
+      const uAtt = await SiengeApiService.getUnitAttachments(unitId);
+      allAttachments = allAttachments.concat(((uAtt && uAtt.results) || []).map((a) => ({
+        ...a, isUnitAttachment: true, unitId: unitId
+      })));
+      AnexosState.selectedUnidade = unitId;
+    }
+
+    AnexosState.contractAttachments = typeof anexosDedupeAttachments === 'function'
+      ? anexosDedupeAttachments(allAttachments)
+      : allAttachments;
     AnexosState.loadingUnidadeAnexos = false;
     renderAnexosModule();
 
@@ -51247,6 +51288,8 @@ window.openAnexosClienteModal = async function(customerId) {
       AnexosState.files = localFiles;
       AnexosState.importedContracts.add(mainC.id);
       if (AnexosApp.renderFilesList) AnexosApp.renderFilesList();
+    } else if (AnexosState.contractAttachments.length > 0 && AnexosApp.importarAnexosDoContrato) {
+      AnexosApp.importarAnexosDoContrato({ auto: true, force: true });
     }
   } catch (err) {
             console.error("Erro ao carregar detalhes do contrato e anexos no modal:", err);

@@ -1646,6 +1646,7 @@ function renderAnexosModule(opts) {
       <div class="anexos-contract-info" id="anexos-contract-info" style="margin-bottom:16px;font-size:0.9rem;color:#64748b;">
         Contrato <strong style="color:var(--color-primary);">${anexosEsc(AnexosState.activeContract.contractNumber || AnexosState.activeContract.id)}</strong>
         ${AnexosState.activeContract.receivableBillId ? ` · Título ${anexosEsc(AnexosState.activeContract.receivableBillId)}` : ''}
+        <div style="margin-top:4px;">Remova os que não serão enviados e escolha a tag de cada um. O nome passa a seguir o padrão do Jurídico.</div>
       </div>` : ''}
         
       <!-- ETAPA 3: Upload e Revisão -->
