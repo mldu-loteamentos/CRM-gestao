@@ -45929,6 +45929,29 @@ window.voltarMapaKmz = function() {
   if (map) setTimeout(() => map.invalidateSize(), 60);
 };
 
+window.kmzFecharClassificacao = function(ok, geracao) {
+  const painel = document.getElementById("kmz-classifica");
+  if (!painel || String(painel.getAttribute("data-geracao") || "") !== String(geracao)) return;
+  const mesma = () => {
+    const ainda = document.getElementById("kmz-classifica");
+    return ainda && String(ainda.getAttribute("data-geracao") || "") === String(geracao) ? ainda : null;
+  };
+  if (!ok) {
+    const texto = painel.querySelector(".loading-status-text");
+    if (texto) texto.textContent = "Não foi possível atualizar os títulos agora.";
+    const giro = painel.querySelector(".loading-spinner");
+    if (giro) giro.remove();
+    setTimeout(() => { const ainda = mesma(); if (ainda) ainda.remove(); }, 1600);
+    return;
+  }
+  const barra = painel.querySelector(".loading-progress-bar");
+  if (barra) {
+    barra.style.animation = "none";
+    barra.style.width = "100%";
+  }
+  setTimeout(() => { const ainda = mesma(); if (ainda) ainda.remove(); }, 280);
+};
+
 window.abrirMapaKmz = async function(empId) {
   const id = String(empId || "");
   const modal = document.getElementById("map-modal-overlay");
@@ -45937,7 +45960,13 @@ window.abrirMapaKmz = async function(empId) {
   if (!modal || !box || typeof L === "undefined") return;
   const nome = kmzNomeCentro(id);
   if (title) title.textContent = nome ? (id + " - " + nome) : id;
-  box.innerHTML = '<div id="leaflet-map-div" style="width:100%;height:100%;"></div>';
+    box.innerHTML = '<div id="leaflet-map-div" style="width:100%;height:100%;"></div>'
+      + '<div id="kmz-classifica" class="kmz-classifica" role="status">'
+      + '<div class="ml-load">'
+      + '<div class="loading-spinner" aria-hidden="true"></div>'
+      + '<div class="loading-status-text">Atualizando os títulos para classificar os lotes…</div>'
+      + '<div class="ml-load-track"><div class="loading-progress-bar"></div></div>'
+      + '</div></div>';
   modal.classList.add("is-kmz-cheio");
   modal.style.display = "";
   modal.classList.add("active");
@@ -46004,10 +46033,13 @@ window.abrirMapaKmz = async function(empId) {
       return pts;
     };
     if (typeof window.desenharQuadrasKmz === "function") window.desenharQuadrasKmz(map, id);
-    if (!document.getElementById("kmz-lote-style")) {
-      const style = document.createElement("style");
-      style.id = "kmz-lote-style";
-      style.textContent = ""
+    let loteStyle = document.getElementById("kmz-lote-style");
+    if (!loteStyle) {
+      loteStyle = document.createElement("style");
+      loteStyle.id = "kmz-lote-style";
+      document.head.appendChild(loteStyle);
+    }
+    loteStyle.textContent = ""
         + ".kmz-lote-icon{background:transparent !important;border:none !important;overflow:visible !important;width:auto !important;height:auto !important;}"
         + ".kmz-lote{display:flex;align-items:center;gap:3px;cursor:pointer;width:max-content;}"
         + ".kmz-lote-bola{width:10px;height:10px;border-radius:50%;box-shadow:0 0 0 1px #fff,0 0 0 2px rgba(15,23,42,.35);flex:none;}"
@@ -46015,7 +46047,7 @@ window.abrirMapaKmz = async function(empId) {
         + ".kmz-lote.is-quitado .kmz-lote-bola{background:#94a3b8;}"
         + ".kmz-lote.is-adimplente .kmz-lote-bola{background:#16a34a;}"
         + ".kmz-lote.is-inadimplente .kmz-lote-bola{background:#dc2626;}"
-        + ".kmz-lote.is-neutro .kmz-lote-bola{background:#facc15;}"
+        + ".kmz-lote.is-neutro .kmz-lote-bola{background:#f8fafc;}"
         + ".leaflet-tooltip.kmz-lote-tip{background:#fff;color:#0f172a;border:1px solid #e2e8f0;border-radius:10px;box-shadow:0 8px 24px rgba(0,0,0,.18);padding:8px 10px;}"
         + ".leaflet-tooltip.kmz-lote-tip .kmz-tip{min-width:148px;font-family:inherit;}"
         + ".leaflet-tooltip.kmz-lote-tip .kmz-tip strong{display:block;font-size:.84rem;}"
@@ -46028,10 +46060,8 @@ window.abrirMapaKmz = async function(empId) {
         + ".kmz-legenda{background:rgba(255,255,255,.96);border-radius:10px;padding:8px 10px;box-shadow:0 4px 14px rgba(0,0,0,.16);font-size:.75rem;color:#0f172a;line-height:1.35;}"
         + ".kmz-legenda div{display:flex;align-items:center;gap:6px;margin-top:3px;}"
         + ".kmz-legenda i{width:10px;height:10px;border-radius:50%;display:inline-block;box-shadow:0 0 0 1px rgba(15,23,42,.2);}"
-        + ".kmz-legenda .is-q{background:#94a3b8;}.kmz-legenda .is-a{background:#16a34a;}.kmz-legenda .is-i{background:#dc2626;}"
+        + ".kmz-legenda .is-q{background:#94a3b8;}.kmz-legenda .is-a{background:#16a34a;}.kmz-legenda .is-i{background:#dc2626;}.kmz-legenda .is-n{background:#f8fafc;box-shadow:0 0 0 1px #94a3b8;}"
         + ".kmz-legenda p{margin:6px 0 0;color:#64748b;font-size:.7rem;}";
-      document.head.appendChild(style);
-    }
     const marcas = [];
     const pontosLote = [];
     const centroDe = (pts) => {
@@ -46066,7 +46096,7 @@ window.abrirMapaKmz = async function(empId) {
         iconAnchor: [5, 9]
       });
       const mark = L.marker(centro, { icon: icon, interactive: true, keyboard: false, zIndexOffset: 400 }).addTo(map);
-      mark.bindTooltip('<div class="kmz-tip"><strong>' + escNome + '</strong><p>Lendo o contrato…</p></div>', { direction: "top", opacity: 1, className: "kmz-lote-tip", offset: [8, -8] });
+      mark.bindTooltip('<div class="kmz-tip"><strong>' + escNome + '</strong><p>Atualizando o título…</p></div>', { direction: "top", opacity: 1, className: "kmz-lote-tip", offset: [8, -8] });
       mark.on("click", () => {
         const info = mark._kmzInfo;
         if (!info || !info.customerId || typeof window.viewCustomerCard !== "function") return;
@@ -46090,13 +46120,16 @@ window.abrirMapaKmz = async function(empId) {
           + '<div><i class="is-q"></i>Cinza · quitado</div>'
           + '<div><i class="is-a"></i>Verde · ativo adimplente</div>'
           + '<div><i class="is-i"></i>Vermelha · ativo inadimplente</div>'
-          + '<p id="kmz-legenda-status">Lendo contratos…</p>';
+          + '<div><i class="is-n"></i>Branco · sem contrato</div>'
+          + '<p id="kmz-legenda-status">Atualizando os títulos para classificar os lotes…</p>';
         L.DomEvent.disableClickPropagation(div);
         return div;
       }
     });
     map.addControl(new Legenda());
     const geracao = (window._kmzMapaGeracao = (window._kmzMapaGeracao || 0) + 1);
+    const painelClassifica = document.getElementById("kmz-classifica");
+    if (painelClassifica) painelClassifica.setAttribute("data-geracao", String(geracao));
     window.kmzCarregarSituacao(id).then((pack) => {
       if (geracao !== window._kmzMapaGeracao) return;
       const indice = (pack && pack.indice) || {};
@@ -46114,10 +46147,12 @@ window.abrirMapaKmz = async function(empId) {
       });
       const status = document.getElementById("kmz-legenda-status");
       if (status) status.textContent = "Passe o mouse para o resumo. Clique para abrir a ficha.";
+      window.kmzFecharClassificacao(true, geracao);
     }).catch((e) => {
       console.warn("[KMZ] situação", e);
       const status = document.getElementById("kmz-legenda-status");
-      if (status) status.textContent = "Não foi possível ler os contratos agora.";
+      if (status) status.textContent = "Não foi possível atualizar os títulos agora.";
+      window.kmzFecharClassificacao(false, geracao);
     });
     (data.quadras || []).forEach((q) => guardar(q && (q.coords || q.coordinates)));
     const enquadrar = () => {

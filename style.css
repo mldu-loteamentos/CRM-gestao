@@ -1574,6 +1574,30 @@ button.btn-fechar:hover,
 #map-modal-overlay.is-kmz-cheio #map-modal-ge-pro-container p {
   display: none;
 }
+#map-iframe-container { position: relative; }
+.kmz-classifica {
+  position: absolute;
+  inset: 0;
+  z-index: 500;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(255, 255, 255, 0.62);
+}
+.kmz-classifica .ml-load {
+  background: #fff;
+  border-radius: 12px;
+  box-shadow: 0 8px 28px rgba(15, 23, 42, 0.18);
+  padding: 22px 20px;
+}
+.kmz-classifica .loading-progress-bar {
+  width: 12%;
+  animation: kmz-classifica-barra 18s ease-out forwards;
+}
+@keyframes kmz-classifica-barra {
+  from { width: 12%; }
+  to { width: 92%; }
+}
 
 .modal-header {
   display: flex;
