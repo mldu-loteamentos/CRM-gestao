@@ -45825,6 +45825,47 @@ window.kmzHtmlResumo = function(etiqueta, info) {
     + '</div>';
 };
 
+window.baixarKmlMapa = function(nome, itens, foco) {
+  const xml = (s) => String(s == null ? "" : s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  const partes = [];
+  (itens || []).forEach((item) => {
+    const pts = window.parseKmzCoordPoints ? window.parseKmzCoordPoints(item && (item.coords || item.coordinates)) : [];
+    if (!pts.length) return;
+    const coords = pts.map((p) => p.lng + "," + p.lat + ",0").join(" ");
+    const titulo = xml(item.name || item.lot_name || nome || "Lote");
+    if (pts.length < 3) {
+      const marca = pts.length === 1
+        ? "<Point><coordinates>" + coords + "</coordinates></Point>"
+        : "<LineString><coordinates>" + coords + "</coordinates></LineString>";
+      partes.push("<Placemark><name>" + titulo + "</name>" + marca + "</Placemark>");
+      return;
+    }
+    const fechado = pts[0].lat === pts[pts.length - 1].lat && pts[0].lng === pts[pts.length - 1].lng
+      ? coords
+      : coords + " " + pts[0].lng + "," + pts[0].lat + ",0";
+    partes.push("<Placemark><name>" + titulo + "</name><styleUrl>#kmz-malha</styleUrl><Polygon><outerBoundaryIs><LinearRing><coordinates>" + fechado + "</coordinates></LinearRing></outerBoundaryIs></Polygon></Placemark>");
+  });
+  if (!partes.length) {
+    alert("Este mapa não tem coordenadas para abrir no Google Earth.");
+    return;
+  }
+  const look = foco && Number.isFinite(Number(foco.lat)) && Number.isFinite(Number(foco.lng))
+    ? "<LookAt><longitude>" + Number(foco.lng) + "</longitude><latitude>" + Number(foco.lat) + "</latitude><altitude>0</altitude><range>500</range></LookAt>"
+    : "";
+  const kml = "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n"
+    + "<kml xmlns=\"http://www.opengis.net/kml/2.2\"><Document><name>" + xml(nome || "Mapa") + "</name>"
+    + "<Style id=\"kmz-malha\"><LineStyle><color>ff365314</color><width>2</width></LineStyle><PolyStyle><color>66facc15</color></PolyStyle></Style>"
+    + look + partes.join("") + "</Document></kml>";
+  const url = URL.createObjectURL(new Blob([kml], { type: "application/vnd.google-earth.kml+xml" }));
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = String(nome || "mapa").replace(/[^\w.-]+/g, "_") + ".kml";
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 4000);
+};
+
 window.abrirMapaKmz = async function(empId) {
   const id = String(empId || "");
   const modal = document.getElementById("map-modal-overlay");
@@ -45837,6 +45878,15 @@ window.abrirMapaKmz = async function(empId) {
   modal.style.display = "";
   modal.classList.add("active");
 
+  const btnEarth = document.getElementById("btn-download-kml");
+  if (btnEarth) {
+    btnEarth.type = "button";
+    btnEarth.onclick = function(ev) {
+      if (ev) ev.preventDefault();
+      alert("O mapa ainda está carregando. Tente de novo em instantes.");
+    };
+  }
+
   let data = {};
   try {
     const { doc, getDoc } = window.firebaseCollections;
@@ -45848,6 +45898,16 @@ window.abrirMapaKmz = async function(empId) {
     }
   } catch (e) {
     console.warn("[KMZ] mapa", e);
+  }
+
+  if (btnEarth) {
+    btnEarth.onclick = function(ev) {
+      if (ev) ev.preventDefault();
+      const itens = (data.placemarks || []).concat(data.quadras || []);
+      const primeiro = itens[0] && window.parseKmzCoordPoints ? window.parseKmzCoordPoints(itens[0].coords || itens[0].coordinates) : [];
+      const foco = primeiro[0] ? { lat: primeiro[0].lat, lng: primeiro[0].lng } : null;
+      window.baixarKmlMapa(nome ? (id + " - " + nome) : id, itens, foco);
+    };
   }
 
   setTimeout(() => {
@@ -46448,7 +46508,8 @@ function abrirLoteGoogleEarth(lotName, coordinatesStr, empId = null) {
     // Configurar o botão de download do KML para o Google Earth Pro
     const btnDownload = document.getElementById('btn-download-kml');
     if (btnDownload) {
-      btnDownload.onclick = () => downloadLoteKml(lotName, lat, lng);
+      btnDownload.type = "button";
+      btnDownload.onclick = () => window.baixarKmlMapa(lotName, [{ name: lotName, coords: coordinatesStr }], { lat: Number(lat), lng: Number(lng) });
     }
 
     // Exibir box do Google Earth Pro (pois é um lote) e ocultar Street View
