@@ -595,7 +595,10 @@ const ResultadoCaixaApp = {
         const emp = empArq || this.empresaDoCentro(cc, nomeCc);
         if (!emp) return;
         if (est.entraNoImposto && !est.entraNoImposto(cc, nomeCc, emp)) return;
-        const row = porEmp[emp] || (porEmp[emp] = { vendas: 0, servicos: 0, financeiras: 0, redV: 0, redS: 0, redF: 0 });
+        const row = porEmp[emp] || (porEmp[emp] = {
+          vendas: 0, servicos: 0, financeiras: 0, redV: 0, redS: 0, redF: 0,
+          deds: { redV: new Map(), redS: new Map(), redF: new Map() }
+        });
         Object.keys(arq.contas[cc] || {}).forEach((code) => {
           const info = arq.contas[cc][code] || {};
           const valor = Number((info.meses || {})[ym]) || 0;
@@ -608,8 +611,29 @@ const ResultadoCaixaApp = {
           if (cl.red && s) {
             const chave = cl.bucket === "servicos" ? "redS" : (cl.bucket === "financeiras" ? "redF" : "redV");
             row[chave] += s;
+            const mapa = row.deds[chave];
+            const k = String(code) + "|" + String(cc);
+            const item = mapa.get(k) || {
+              conta: String(code || ""),
+              nome: String(info.nome || "").replace(/\s+/g, " ").trim(),
+              cc: String(cc || ""),
+              cn: String(nomeCc || "").replace(/\s+/g, " ").trim(),
+              v: 0
+            };
+            item.v += s;
+            mapa.set(k, item);
           }
         });
+      });
+    });
+    Object.keys(porEmp).forEach((emp) => {
+      const row = porEmp[emp];
+      if (!row.deds) return;
+      ["redV", "redS", "redF"].forEach((chave) => {
+        const mapa = row.deds[chave];
+        row.deds[chave] = mapa && typeof mapa.values === "function"
+          ? [...mapa.values()].filter((x) => Math.abs(x.v) >= 0.5)
+          : [];
       });
     });
     return Object.keys(porEmp).length ? porEmp : null;

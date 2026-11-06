@@ -308,6 +308,21 @@ const HomeDashboard = {
       groups.push({ id: 'prazo-etapa', label: vencidos.length + ' títulos venceram prazo da etapa', items: vencidos, hideIfEmpty: false });
       groups.push({ id: 'ir-juridico', label: paraJuridico.length + ' títulos precisam ir para jurídico', items: paraJuridico, hideIfEmpty: false });
       groups.push({ id: 'apos-acordo', label: aposAcordo.length + ' títulos atrasaram após acordo', items: aposAcordo, hideIfEmpty: false });
+      const colenci = (typeof window.colenciPixInfo === 'function')
+        ? scopeClients.map(c => ({ c, info: window.colenciPixInfo(c) })).filter(x => x.info)
+        : [];
+      colenci.sort((a, b) => String(a.info.prazoIso).localeCompare(String(b.info.prazoIso)));
+      const colenciAtrasados = colenci.filter(x => x.info.atrasado).length;
+      groups.push({
+        id: 'pix-colenci',
+        label: colenci.length + ' clientes aguardando repasse de Pix da Colenci'
+          + (colenciAtrasados ? ' (' + colenciAtrasados + ' com prazo vencido)' : ''),
+        items: colenci.map(x => Object.assign({}, x.c, {
+          hint: (x.info.atrasado ? 'Prazo vencido em ' : 'Prazo do repasse: ') + x.info.prazoBr
+        })),
+        hideIfEmpty: true,
+        count: colenci.length
+      });
       const nexDays = (typeof window.nexCorreiosCheckDays === 'function') ? window.nexCorreiosCheckDays() : 15;
       const nexRows = (typeof window.nexCollectAll === 'function' && typeof window.nexNeedsCorreiosCheck === 'function')
         ? window.nexCollectAll().filter(it => window.nexNeedsCorreiosCheck(it))

@@ -275,6 +275,11 @@ const OrcamentoImpostosApp = {
           id, nome: nome || "",
           vendas: OrcEst.z(), servicos: OrcEst.z(), financeiras: OrcEst.z(),
           redV: OrcEst.z(), redS: OrcEst.z(), redF: OrcEst.z(),
+          deds: {
+            redV: Array.from({ length: 12 }, () => new Map()),
+            redS: Array.from({ length: 12 }, () => new Map()),
+            redF: Array.from({ length: 12 }, () => new Map())
+          },
           pis: OrcEst.z(), cofins: OrcEst.z(), irMes: OrcEst.z(), csllMes: OrcEst.z(),
           ap: { pis: OrcEst.z(), cofins: OrcEst.z(), irpj: OrcEst.z(), csll: OrcEst.z() }
         };
@@ -302,10 +307,24 @@ const OrcamentoImpostosApp = {
         if (cl.red && s) {
           const chave = cl.bucket === "servicos" ? "redS" : (cl.bucket === "financeiras" ? "redF" : "redV");
           row[chave][i] += s;
+          const mapa = row.deds[chave][i];
+          const k = String(l.conta || "") + "|" + String(l.cc || "");
+          const item = mapa.get(k) || {
+            conta: String(l.conta || ""),
+            nome: String(l.cn || l.nome || "").replace(/\s+/g, " ").trim(),
+            cc: String(l.cc || ""),
+            cn: String(l.en || "").replace(/\s+/g, " ").trim(),
+            v: 0
+          };
+          item.v += s;
+          mapa.set(k, item);
         }
       });
     });
     Object.values(emp).forEach((row) => {
+      ["redV", "redS", "redF"].forEach((chave) => {
+        row.deds[chave] = row.deds[chave].map((mapa) => [...mapa.values()].filter((x) => Math.abs(x.v) >= 0.5));
+      });
       for (let i = 0; i < 12; i++) {
         const v = row.vendas[i];
         const s = row.servicos[i];
@@ -667,6 +686,10 @@ const OrcamentoImpostosApp = {
   paintCorpo() {
     const body = document.getElementById("orc-imp-body");
     if (!body) return;
+    this._dicas = {};
+    this._dicaN = 0;
+    const tipVelha = document.getElementById("orc-ded-tip");
+    if (tipVelha) tipVelha.hidden = true;
     const lista = this.lista();
     if (!lista.length) {
       body.innerHTML = `<div class="orc-dfc-erro">Não há receita de 2027 na base para estimar o imposto.</div>`;
@@ -710,14 +733,60 @@ const OrcamentoImpostosApp = {
           </tr></tfoot>
         </table>
       </div>
-      <p class="orc-est-nota">Janeiro de 2027 usa o forecast de 2026. Receita de centro de custo de parceiro, e de centro com o imposto desmarcado, fica de fora. Na SPE 36, o imposto incide sobre a receita inteira: a parte do parceiro entra na base. A taxa de cessão entra na venda de lotes quando o plano marca essa conta nessa base. Na empresa 3, a administração de carteira de recebíveis entra na venda de lotes. A coluna Vendas é a receita integral. As redutoras ficam à parte e entram abatidas na base do imposto. Passe o mouse no valor para ver a conta do PIS, do COFINS, do IRPJ e da CSLL.</p>`;
+      <p class="orc-est-nota">Janeiro de 2027 usa o forecast de 2026. Receita de centro de custo de parceiro, e de centro com o imposto desmarcado, fica de fora. Na SPE 36, o imposto incide sobre a receita inteira: a parte do parceiro entra na base. A taxa de cessão entra na venda de lotes quando o plano marca essa conta nessa base. Na empresa 3, a administração de carteira de recebíveis entra na venda de lotes. A coluna Vendas é a receita integral. As redutoras ficam à parte e entram abatidas na base do imposto. Passe o mouse na redutora para ver as deduções, e no PIS, no COFINS, no IRPJ e na CSLL para ver a conta.</p>`;
     const tab = body.querySelector(".orc-imp-tab");
     if (tab) tab.addEventListener("click", (ev) => {
       const el = ev.target.closest("[data-est-id]");
       if (!el || !tab.contains(el) || el.closest(".orc-imp-det-row")) return;
       this.toggle(el.getAttribute("data-est-id"));
     });
+    if (!this._dedLigado) {
+      this._dedLigado = true;
+      body.addEventListener("mouseover", (ev) => this.mostrarDed(ev));
+      body.addEventListener("mouseout", (ev) => this.esconderDed(ev));
+    }
     if (window.lucide && lucide.createIcons) lucide.createIcons();
+  },
+
+  mostrarDed(ev) {
+    const td = ev.target.closest("[data-ded]");
+    const tip = this.tipDed();
+    if (!td || !tip) return;
+    const linhas = (this._dicas && this._dicas[td.getAttribute("data-ded")]) || [];
+    if (!linhas.length) { tip.hidden = true; return; }
+    const esc = (t) => OrcEst.esc(t);
+    tip.innerHTML = `<strong>Deduções</strong><table>${linhas.map((l) => `<tr><td>${esc(l.onde)}</td><td>${esc(l.conta)}</td><td>${esc(l.valor)}</td></tr>`).join("")}</table>`;
+    tip.hidden = false;
+    const r = td.getBoundingClientRect();
+    const w = tip.offsetWidth;
+    const h = tip.offsetHeight;
+    let left = Math.min(r.left, window.innerWidth - w - 8);
+    if (left < 8) left = 8;
+    let top = r.bottom + 6;
+    if (top + h > window.innerHeight - 8) top = Math.max(8, r.top - h - 6);
+    tip.style.left = left + "px";
+    tip.style.top = top + "px";
+  },
+
+  esconderDed(ev) {
+    const td = ev.target.closest("[data-ded]");
+    if (!td) return;
+    const prox = ev.relatedTarget;
+    if (prox && td.contains(prox)) return;
+    const tip = document.getElementById("orc-ded-tip");
+    if (tip) tip.hidden = true;
+  },
+
+  tipDed() {
+    let tip = document.getElementById("orc-ded-tip");
+    if (!tip) {
+      tip = document.createElement("div");
+      tip.id = "orc-ded-tip";
+      tip.className = "orc-ded-tip";
+      tip.hidden = true;
+      document.body.appendChild(tip);
+    }
+    return tip;
   },
 
   cel(v, id, title) {
@@ -909,17 +978,35 @@ const OrcamentoImpostosApp = {
     const ali = OrcEst.aliquotas();
     const dez = this.baseForecastMes(row, "2026-12");
     const cols = [{ nome: "Vendas", arr: row.vendas.map((v, i) => this.vendaIntegral(v, row.redV[i])), dez: dez ? this.vendaIntegral(dez.vendas, dez.redV) : null, dica: "Receita integral, antes das redutoras." }];
-    if (tem(row.redV) || (dez && Math.abs(Number(dez.redV) || 0) >= 0.5)) cols.push({ nome: "Redutoras", arr: row.redV, dez: dez ? dez.redV : null, dica: "Distratos e as outras contas redutoras. Ficam fora da coluna Vendas e entram abatidas na base do imposto." });
+    if (tem(row.redV) || (dez && Math.abs(Number(dez.redV) || 0) >= 0.5)) cols.push({ nome: "Redutoras", arr: row.redV, dez: dez ? dez.redV : null, deds: row.deds && row.deds.redV, dedDez: dez && dez.deds && dez.deds.redV, dica: "Distratos e as outras contas redutoras. Ficam fora da coluna Vendas e entram abatidas na base do imposto." });
     cols.push({ nome: "Serviços", arr: row.servicos, dez: dez && dez.servicos });
-    if (tem(row.redS) || (dez && Math.abs(Number(dez.redS) || 0) >= 0.5)) cols.push({ nome: "Red. serviços", arr: row.redS, dez: dez ? dez.redS : null });
+    if (tem(row.redS) || (dez && Math.abs(Number(dez.redS) || 0) >= 0.5)) cols.push({ nome: "Red. serviços", arr: row.redS, dez: dez ? dez.redS : null, deds: row.deds && row.deds.redS, dedDez: dez && dez.deds && dez.deds.redS });
     if (tem(row.financeiras) || tem(row.redF)) cols.push({ nome: "Aplicações", arr: row.financeiras, dez: dez && dez.financeiras });
-    if (tem(row.redF) || (dez && Math.abs(Number(dez.redF) || 0) >= 0.5)) cols.push({ nome: "Red. aplicações", arr: row.redF, dez: dez ? dez.redF : null });
+    if (tem(row.redF) || (dez && Math.abs(Number(dez.redF) || 0) >= 0.5)) cols.push({ nome: "Red. aplicações", arr: row.redF, dez: dez ? dez.redF : null, deds: row.deds && row.deds.redF, dedDez: dez && dez.deds && dez.deds.redF });
     const head = `<th>Competência</th>${cols.map((c) => `<th${c.dica ? ` title="${OrcEst.esc(c.dica)}"` : ""}>${c.nome}</th>`).join("")}<th>PIS</th><th>COFINS</th><th>Pago em</th>`;
     const celTxt = (valor, linhas) => {
       const dica = linhas && linhas.length ? ` title="${linhas.map((l) => OrcEst.esc(l)).join("&#10;")}" style="cursor:help"` : "";
       return `<td${dica}>${mo(valor)}</td>`;
     };
-    const celBase = (c, i) => celTxt(i == null ? c.dez : c.arr[i]);
+    const marcarDed = (valor, itens) => {
+      const linhas = (itens || []).filter((x) => Math.abs(Number(x.v) || 0) >= 0.5)
+        .sort((a, b) => Math.abs(b.v) - Math.abs(a.v))
+        .map((x) => ({
+          onde: [x.cc, x.cn].filter(Boolean).join(" — "),
+          conta: [x.conta, x.nome].filter(Boolean).join(" "),
+          valor: mo(x.v)
+        }));
+      if (!linhas.length) return celTxt(valor);
+      if (!this._dicas) this._dicas = {};
+      const id = "d" + (++this._dicaN);
+      this._dicas[id] = linhas;
+      return `<td class="orc-red-cel" data-ded="${id}">${mo(valor)}</td>`;
+    };
+    const celBase = (c, i) => {
+      const itens = i == null ? c.dedDez : (c.deds && c.deds[i]);
+      if (!itens) return celTxt(i == null ? c.dez : c.arr[i]);
+      return marcarDed(i == null ? c.dez : c.arr[i], itens);
+    };
     const linhaMes = (rotulo, i, pis, cofins, quando) => {
       const base = i == null ? dez : this.baseMes(row, i);
       const memP = base ? this.memoriaPis(ali, base, rotulo, quando) : [];

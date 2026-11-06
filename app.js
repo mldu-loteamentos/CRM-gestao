@@ -10422,6 +10422,148 @@ window.getWebroBaixaStatus = function(client) {
   return elapsed > 3 ? "PENDENTE" : "AGUARDANDO";
 };
 
+/* ---------- Aguardando Pix Colenci ----------
+ * Acordo com sinal pago à Colenci: o cliente fica com a tag até a Colenci repassar o Pix.
+ * Prazo do repasse: COLENCI_PIX_PRAZO_DIAS dias corridos depois de criar a tag.
+ * A tag sai quando a ocorrência é cancelada ou quando entra pagamento no título depois da criação. */
+window.COLENCI_PIX_PRAZO_DIAS = 5;
+
+window.isColenciPixCanal = function(canal) {
+  const n = String(canal || "").toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "").trim();
+  return n.indexOf("colenci") !== -1 && (n.indexOf("pix") !== -1 || n.indexOf("repasse") !== -1);
+};
+
+window.colenciPixPrazoIso = function(criadaEm) {
+  const base = String(criadaEm || "").slice(0, 10);
+  if (!base) return "";
+  const dias = Number(window.COLENCI_PIX_PRAZO_DIAS) || 5;
+  return typeof window.addDaysIso === "function" ? window.addDaysIso(base, dias) : base;
+};
+
+window.getActiveColenciPixOccurrence = function(client) {
+  if (!client || !window.AppState) return null;
+  const cid = client.customerId;
+  if (cid == null) return null;
+  const pega = (store) => (typeof window.getCustomerNotesList === "function"
+    ? window.getCustomerNotesList(store || {}, cid)
+    : ((store && (store[cid] || store[String(cid)])) || []));
+  const notes = [].concat(pega(AppState.notes), pega(AppState.judNotes));
+  if (!notes.length) return null;
+
+  const idSet = new Set();
+  const pushId = (v) => {
+    if (v == null || v === "") return;
+    idSet.add(String(v));
+    if (typeof window.normalizeContractIdToken === "function") {
+      const tok = window.normalizeContractIdToken(String(v));
+      if (tok) idSet.add(tok);
+    }
+  };
+  pushId(client.saleId);
+  (client.billIds || []).forEach(pushId);
+
+  const matches = notes.filter((occ) => {
+    if (!occ || !(occ.colenciPix || window.isColenciPixCanal(occ.canal))) return false;
+    if (occ.status === "Cancelada" || occ.colenciRecebido) return false;
+    if (!occ.date) return false;
+    // Pagamento no título depois da criação da tag = repasse feito.
+    const comBase = Object.assign({}, occ, { promiseDate: String(occ.date).slice(0, 10), promiseStatus: null });
+    if (typeof window.webroOccurrenceWasReceived === "function" && window.webroOccurrenceWasReceived(comBase, client)) return false;
+    if (!occ.saleId) return true;
+    const raw = String(occ.saleId);
+    if (idSet.has(raw)) return true;
+    const tok = typeof window.normalizeContractIdToken === "function" ? window.normalizeContractIdToken(raw) : "";
+    return !!(tok && idSet.has(tok));
+  });
+  if (!matches.length) return null;
+  matches.sort((a, b) => String(b.date || "").localeCompare(String(a.date || "")));
+  return matches[0];
+};
+
+/** null | 'AGUARDANDO' | 'PENDENTE' (prazo do repasse passou) */
+window.getColenciPixStatus = function(client) {
+  const occ = window.getActiveColenciPixOccurrence(client);
+  if (!occ) return null;
+  const prazo = String(occ.colenciPrazo || window.colenciPixPrazoIso(occ.date)).slice(0, 10);
+  const hoje = typeof window.localDateStr === "function" ? window.localDateStr(new Date()) : new Date().toISOString().slice(0, 10);
+  return prazo && hoje > prazo ? "PENDENTE" : "AGUARDANDO";
+};
+
+window.colenciPixInfo = function(client) {
+  const occ = window.getActiveColenciPixOccurrence(client);
+  if (!occ) return null;
+  const criada = String(occ.date).slice(0, 10);
+  const prazo = String(occ.colenciPrazo || window.colenciPixPrazoIso(occ.date)).slice(0, 10);
+  const hoje = typeof window.localDateStr === "function" ? window.localDateStr(new Date()) : new Date().toISOString().slice(0, 10);
+  const dia = (iso) => new Date(iso + "T12:00:00").getTime();
+  const decorridos = Math.max(0, Math.round((dia(hoje) - dia(criada)) / 86400000));
+  const br = (iso) => (typeof window.formatIsoDateBr === "function" ? window.formatIsoDateBr(iso) : iso);
+  return {
+    occ: occ,
+    criadaIso: criada,
+    prazoIso: prazo,
+    criadaBr: br(criada),
+    prazoBr: br(prazo),
+    decorridos: decorridos,
+    atrasado: !!(prazo && hoje > prazo)
+  };
+};
+
+window.colenciPixTagHtml = function(client) {
+  const info = window.colenciPixInfo(client);
+  if (!info) return "";
+  const days = typeof window.getAcordoJudicialQuebradoDays === "function"
+    ? window.getAcordoJudicialQuebradoDays(client)
+    : (Number(client && client.maxDaysDelay) || 0);
+  const daysLabel = days + " dia" + (days === 1 ? "" : "s");
+  const label = info.atrasado ? "Pix Colenci atrasado" : "Aguardando Pix Colenci";
+  const bg = info.atrasado ? "#fef3c7" : "#e0f2fe";
+  const border = info.atrasado ? "#f59e0b" : "#7dd3fc";
+  const color = info.atrasado ? "#92400e" : "#075985";
+  const icon = info.atrasado ? "alert-triangle" : "hourglass";
+  const q = (s) => String(s || "").replace(/\\/g, "\\\\").replace(/'/g, "\\'");
+  return `
+    <div class="delay-badge" style="padding: 3px 10px; font-size: 0.75rem; line-height: 1.2; border-radius: 12px; display: inline-flex; align-items: center; gap: 4px; border: 1px solid ${border}; background-color: ${bg}; color: ${color}; font-weight: 600; cursor: help; white-space: nowrap;"
+      onmouseenter="if(window.showColenciPixTooltip) window.showColenciPixTooltip(event, '${q(info.criadaBr)}', '${q(info.prazoBr)}', ${info.decorridos}, ${info.atrasado ? "true" : "false"})"
+      onmouseleave="if(window.hideWebroAgingTooltip) window.hideWebroAgingTooltip()">
+      <i data-lucide="${icon}" style="width: 14px; height: 14px; flex-shrink: 0;"></i>
+      <span>${label} · ${daysLabel}</span>
+    </div>
+  `;
+};
+
+window.showColenciPixTooltip = function(event, criadaBr, prazoBr, decorridos, atrasado) {
+  // Reaproveita o balão da tag Webro (mesmo elemento, escondido por hideWebroAgingTooltip).
+  let tooltip = document.getElementById("webro-aging-tooltip");
+  if (!tooltip) {
+    tooltip = document.createElement("div");
+    tooltip.id = "webro-aging-tooltip";
+    tooltip.style.cssText = "position:fixed;z-index:99999;display:none;background:transparent;min-width:260px;max-width:340px;pointer-events:none;border-radius:8px;box-shadow:0 8px 24px rgba(0,0,0,0.12);";
+    document.body.appendChild(tooltip);
+  }
+  const prazoDias = Number(window.COLENCI_PIX_PRAZO_DIAS) || 5;
+  const statusLine = atrasado
+    ? `<div style="margin-top:8px;font-size:0.72rem;font-weight:700;color:#92400e;">Prazo de ${prazoDias} dias passou (${decorridos} dia(s) desde a tag). Cobrar o repasse da Colenci.</div>`
+    : `<div style="margin-top:8px;font-size:0.72rem;color:#075985;">Dentro do prazo de ${prazoDias} dias (${decorridos} decorrido(s)). Não é acordo quebrado.</div>`;
+  tooltip.innerHTML = `
+    <div style="border-left:4px solid ${atrasado ? "#f59e0b" : "#0284c7"};padding:12px;background:#fff;border-radius:8px;">
+      <div style="font-size:0.72rem;font-weight:700;color:${atrasado ? "#92400e" : "#075985"};text-transform:uppercase;letter-spacing:0.03em;margin-bottom:8px;">Aguardando Pix Colenci</div>
+      <div style="font-size:0.8rem;color:#334155;line-height:1.45;">
+        <div><strong>Tag criada em:</strong> ${criadaBr || "—"}</div>
+        <div><strong>Prazo do repasse:</strong> ${prazoBr || "—"}</div>
+      </div>
+      ${statusLine}
+    </div>
+  `;
+  tooltip.style.display = "block";
+  let top = event.clientY + 12;
+  let left = event.clientX + 12;
+  if (left + 360 > window.innerWidth) left = Math.max(8, event.clientX - 360);
+  if (top + tooltip.offsetHeight > window.innerHeight) top = Math.max(8, event.clientY - tooltip.offsetHeight - 12);
+  tooltip.style.top = top + "px";
+  tooltip.style.left = left + "px";
+};
+
 window.hideWebroPendingFila = false;
 window.hideWebroPendingZero = false;
 
@@ -10497,6 +10639,9 @@ window.hideWebroAgingTooltip = function() {
 };
 
 window.wrapAgingWithWebro = function(client, innerHtml) {
+  // Aguardando Pix Colenci vem primeiro: o cliente pagou o sinal à Colenci, não é acordo quebrado.
+  const colenci = typeof window.colenciPixTagHtml === "function" ? window.colenciPixTagHtml(client) : "";
+  if (colenci) return colenci;
   const webro = typeof window.webroAgingTagHtml === "function" ? window.webroAgingTagHtml(client) : "";
   if (!webro) return innerHtml || "";
   // Substitui a badge de aging: mesma forma, com tag Webro + dias de atraso
@@ -18981,6 +19126,7 @@ async function saveCustomerOccurrence() {
     return;
   }
   const isReuniaoSemanal = typeof window.isReuniaoSemanalTerceirizadaCanal === "function" && window.isReuniaoSemanalTerceirizadaCanal(canal);
+  const isColenciPix = typeof window.isColenciPixCanal === "function" && window.isColenciPixCanal(canal);
   
   if (isProposalReneg) {
       if (typeof window.applyRenegotiationText === 'function') {
@@ -19001,7 +19147,9 @@ async function saveCustomerOccurrence() {
   const iniciativa = iniciativaEl ? iniciativaEl.value : "";
   
   if (!text) {
-    alert(isWebroBaixa
+    alert(isColenciPix
+      ? "Descreva o acordo e o valor do sinal que a Colenci vai repassar."
+      : isWebroBaixa
       ? "Preencha a observação da baixa Webro."
       : (isReuniaoSemanal ? "Descreva a conversa com a terceirizada." : "Descreva o que foi falado na conversa."));
     return;
@@ -19011,7 +19159,7 @@ async function saveCustomerOccurrence() {
     return;
   }
   
-  const isInternalLikeCanal = canal === "Nota interna" || isProposalReneg || isReuniaoSemanal;
+  const isInternalLikeCanal = canal === "Nota interna" || isProposalReneg || isReuniaoSemanal || isColenciPix;
 
   if (!isInternalLikeCanal && !isWebroBaixa && canal !== "Retorno Agendado") {
     if (!promiseDate) {
@@ -19093,16 +19241,19 @@ async function saveCustomerOccurrence() {
     contractId: AppState.currentSalesContractId || AppState.selectedContractId || null,
     unitId: currentSale.unitId || null,
     text: text,
-    promiseDate: (canal === "Nota interna" || isProposalReneg || isReuniaoSemanal) ? null : promiseDate,
-    promiseStatus: (canal === "Nota interna" || isProposalReneg || isReuniaoSemanal || !promiseDate) ? null : "Pendente",
-    reminder: (canal === "Nota interna" || isProposalReneg || isWebroBaixa || isReuniaoSemanal) ? null : reminder,
+    // Pix Colenci não usa a data de promessa: senão a rotina de promessas marcaria "Quebrado" depois do prazo.
+    promiseDate: (canal === "Nota interna" || isProposalReneg || isReuniaoSemanal || isColenciPix) ? null : promiseDate,
+    promiseStatus: (canal === "Nota interna" || isProposalReneg || isReuniaoSemanal || isColenciPix || !promiseDate) ? null : "Pendente",
+    reminder: (canal === "Nota interna" || isProposalReneg || isWebroBaixa || isReuniaoSemanal || isColenciPix) ? null : reminder,
     canal: canal,
-    iniciativa: (canal === "Nota interna" || isProposalReneg || isWebroBaixa || isReuniaoSemanal) ? null : iniciativa,
-    promisedInstallments: AppState.selectedPromisedInstallments && canal !== "Nota interna" && canal !== "Proposta de renegociação" && !isWebroBaixa && !isReuniaoSemanal
+    iniciativa: (canal === "Nota interna" || isProposalReneg || isWebroBaixa || isReuniaoSemanal || isColenciPix) ? null : iniciativa,
+    promisedInstallments: AppState.selectedPromisedInstallments && canal !== "Nota interna" && canal !== "Proposta de renegociação" && !isWebroBaixa && !isReuniaoSemanal && !isColenciPix
       ? AppState.selectedPromisedInstallments.map(item => window.getPromisedInstallmentLabel(item) || item)
       : [],
     pinned: (canal === "Nota interna") ? isPinned : false,
     webroBaixa: !!isWebroBaixa,
+    colenciPix: !!isColenciPix,
+    colenciPrazo: isColenciPix && typeof window.colenciPixPrazoIso === "function" ? window.colenciPixPrazoIso(new Date().toISOString()) : null,
     reuniaoSemanalTerceirizada: !!isReuniaoSemanal,
     updatedAt: new Date().toISOString(),
     attachments: []
@@ -19498,6 +19649,20 @@ window.validateOccurrenceForm = function() {
 
     const pDate = pDateEl ? pDateEl.value.trim() : "";
     isValid = text.length > 0 && pDate.length > 0 && canal.length > 0;
+  } else if (typeof window.isColenciPixCanal === "function" && window.isColenciPixCanal(canal)) {
+    if (iniciativaGroup) iniciativaGroup.style.display = "none";
+    if (promiseRow) promiseRow.style.display = "none";
+    if (installmentsGroup) installmentsGroup.style.display = "none";
+    if (pinGroup) pinGroup.style.display = "none";
+    if (reminderEl) reminderEl.closest('.form-group').style.display = "none";
+
+    const prazoDias = Number(window.COLENCI_PIX_PRAZO_DIAS) || 5;
+    if (labelNoteText) labelNoteText.innerHTML = 'Acordo e valor do sinal <span style="color: var(--color-danger);">*</span>'
+      + ' <span style="font-weight:500;text-transform:none;letter-spacing:0;color:#64748b;">(prazo do repasse: ' + prazoDias + ' dias a partir de hoje)</span>';
+    if (saveBtn) saveBtn.innerHTML = '<i data-lucide="save" style="width: 16px;"></i> Gravar Aguardando Pix Colenci';
+    if (textEl) textEl.placeholder = "Acordo feito, valor do sinal e data em que o cliente pagou a Colenci...";
+
+    isValid = text.length > 0 && canal.length > 0;
   } else if (typeof window.isReuniaoSemanalTerceirizadaCanal === "function" && window.isReuniaoSemanalTerceirizadaCanal(canal)) {
     if (iniciativaGroup) iniciativaGroup.style.display = "none";
     if (promiseRow) promiseRow.style.display = "none";
@@ -19596,6 +19761,7 @@ window.canOccurrenceEditParcels = function(occ) {
   const canal = String(occ.canal || "");
   if (canal === "Nota interna" || canal === "Retorno Agendado" || canal === "Proposta de renegociação") return false;
   if (typeof window.isWebroBaixaCanal === "function" && window.isWebroBaixaCanal(canal)) return false;
+  if (typeof window.isColenciPixCanal === "function" && window.isColenciPixCanal(canal)) return false;
   if (typeof window.isReuniaoSemanalTerceirizadaCanal === "function" && window.isReuniaoSemanalTerceirizadaCanal(canal)) return false;
   return true;
 };
@@ -50007,7 +50173,7 @@ function getCanonicalOptionList(type) {
   const isCanal = type === 'canal';
   const storageKey = isCanal ? 'crm_canal_options' : 'crm_lembrete_options';
   const canonical = isCanal
-    ? ['Ligação', 'WhatsApp', 'E-mail', 'Presencial', 'Nota interna', 'Proposta de renegociação', 'Retorno Agendado', 'Aguardando Baixa Webro', 'Reunião Semanal Terceirizada']
+    ? ['Ligação', 'WhatsApp', 'E-mail', 'Presencial', 'Nota interna', 'Proposta de renegociação', 'Retorno Agendado', 'Aguardando Baixa Webro', 'Aguardando Pix Colenci', 'Reunião Semanal Terceirizada']
     : ['Ligar', 'Mandar mensagem', 'Mandar e-mail', 'Enviar carta', 'Aprovação Gestor'];
 
   try {
