@@ -1598,6 +1598,10 @@ button.btn-fechar:hover,
   from { width: 12%; }
   to { width: 92%; }
 }
+.kmz-load { padding: 28px 16px; }
+.kmz-page .cc-table td.kmz-carregando { white-space: normal; overflow: visible; text-align: center; }
+.kmz-load .loading-progress-bar { width: 8%; animation: kmz-carga 6s ease-out forwards; }
+@keyframes kmz-carga { from { width: 8%; } to { width: 92%; } }
 
 .modal-header {
   display: flex;

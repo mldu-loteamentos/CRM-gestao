@@ -1313,6 +1313,12 @@ const GerarPagamentoApp = {
     return String(titulo) + "|" + String(parcela || "");
   },
 
+  ehCartaoTitulo(chave) {
+    const forma = this.state.formaSienge[chave] || {};
+    const tipo = forma.tipo || "";
+    return !!(window.BoletoCheck && BoletoCheck.ehCartao(tipo));
+  },
+
   lotesLocal() {
     try {
       const v = JSON.parse(localStorage.getItem(this.LOTES_LOCAL) || "[]");
@@ -1606,13 +1612,20 @@ const GerarPagamentoApp = {
     const docsNota = new Set(((nota && nota.cnpjs) || []).map((d) => BoletoCheck.digits(d)).filter((d) => d.length >= 11));
     if (prestador) docsNota.add(BoletoCheck.digits(prestador));
     if (!docsNota.size && !(nota && nota.cnpjPrestador)) return;
+    const prest = BoletoCheck.digits(prestador);
+    const bate = (doc) => {
+      const n = BoletoCheck.digits(doc);
+      if (n.length !== 11 && n.length !== 14) return false;
+      return prest ? n === prest : docsNota.has(n);
+    };
     let benef = this.docBeneficiarioPagamento(payment);
-    if (!benef && window.NotaFiscalCheck && typeof NotaFiscalCheck.cnpjBeneficiarioBoleto === "function") {
-      try { benef = await NotaFiscalCheck.cnpjBeneficiarioBoleto(billId); } catch (e) { benef = ""; }
+    if (!bate(benef) && window.NotaFiscalCheck && typeof NotaFiscalCheck.cnpjBeneficiarioBoleto === "function") {
+      let doPdf = "";
+      try { doPdf = await NotaFiscalCheck.cnpjBeneficiarioBoleto(billId); } catch (e) { doPdf = ""; }
+      if (bate(doPdf) || !benef) benef = doPdf;
     }
     if (!benef || (benef.length !== 11 && benef.length !== 14)) return;
-    const prest = BoletoCheck.digits(prestador);
-    const igual = prest ? benef === prest : docsNota.has(benef);
+    const igual = bate(benef);
     if (igual) return;
     const msg = `Beneficiário do boleto (${BoletoCheck.docFmt(benef)}) é diferente do prestador da nota. Informe no Sienge que o beneficiário foi alterado e clique em Liberar.`;
     check.avisos = check.avisos || [];
@@ -2195,13 +2208,14 @@ const GerarPagamentoApp = {
       const conta = r.esperada;
       const contaKey = contaKeyDe(r);
       const dia = this.diaDoLote(r.vencimento);
-      const key = conta ? contaKey + "@" + (dia || "sem-data") : "__sem";
+      const chave = this.chaveTitulo(r.titulo, r.parcela);
+      const cartao = this.ehCartaoTitulo(chave);
+      const key = cartao ? "__cartao" : (conta ? contaKey + "@" + (dia || "sem-data") : "__sem");
       if (!grupos[key]) {
         const ccConta = this.ccDe(r.ccId);
         grupos[key] = { key, contaKey, dia: conta ? dia : "", conta, empresaConta: String((ccConta && this.companyIdOf(ccConta)) || ""), itens: {}, ordem: [] };
       }
       const g = grupos[key];
-      const chave = this.chaveTitulo(r.titulo, r.parcela);
       const inteiro = contasDoTitulo[chave].size === 1 && r.tituloAPagar != null;
       if (!g.itens[chave]) {
         g.itens[chave] = {
@@ -2226,6 +2240,20 @@ const GerarPagamentoApp = {
     Object.keys(destinos).forEach((ch) => {
       const d = destinos[ch];
       const r = porTitulo[ch][0];
+      if (this.ehCartaoTitulo(ch)) {
+        const key = "__cartao";
+        if (!grupos[key]) grupos[key] = { key, contaKey: "", dia: "", conta: null, empresaConta: "", itens: {}, ordem: [] };
+        const g = grupos[key];
+        if (g.itens[ch]) return;
+        g.itens[ch] = {
+          chave: ch, titulo: r.titulo, parcela: r.parcela, credor: r.credor, credorId: r.credorId, companyId: r.companyId, documento: r.documento,
+          vencimento: r.vencimento, valor: r.tituloValor, aPagar: r.tituloAPagar, inteiro: true, autorizacao: r.autorizacao || null,
+          guiaUnica: false, acertos: [],
+          ccs: (r.ccsTitulo || []).map((c) => ({ id: c.id, nome: c.nome, parceria: c.parceria, rateio: c.rateio, planos: c.planos || [] }))
+        };
+        g.ordem.push(ch);
+        return;
+      }
       const conta = d.conta;
       if (!conta) {
         const key = "__sem";
@@ -2278,7 +2306,7 @@ const GerarPagamentoApp = {
         const selKey = g.key + "|" + it.chave;
         if (!this.state.selInit[selKey]) {
           this.state.selInit[selKey] = true;
-          this.state.sel[selKey] = g.key !== "__sem" && !it.emLote;
+          this.state.sel[selKey] = g.key !== "__sem" && g.key !== "__cartao" && !it.emLote;
         }
         it.selKey = selKey;
         it.pag = this.state.pagInfo[it.chave] || null;
@@ -2846,7 +2874,7 @@ const GerarPagamentoApp = {
   gruposDoPeriodo() {
     const grupos = this.gruposLote();
     const noPeriodo = (dia) => this.noPeriodoBuscado(dia);
-    const aGerarTodos = grupos.map((g) => ({ ...g, itens: g.itens.filter((it) => !it.emLote) })).filter((g) => g.itens.length);
+    const aGerarTodos = grupos.filter((g) => g.key !== "__cartao").map((g) => ({ ...g, itens: g.itens.filter((it) => !it.emLote) })).filter((g) => g.itens.length);
     return this.state.diaRetro
       ? this.recortarGrupos(aGerarTodos, (dia) => dia === this.state.diaRetro)
       : this.recortarGrupos(aGerarTodos, noPeriodo);
@@ -3711,6 +3739,54 @@ const GerarPagamentoApp = {
     </button>`;
   },
 
+  itensCartao(grupos, dia) {
+    const g = (grupos || []).find((x) => x.key === "__cartao");
+    const itens = g ? g.itens.filter((it) => !it.emLote) : [];
+    if (!dia) return itens;
+    return itens.filter((it) => {
+      const venc = String(it.vencimento || "").slice(0, 10);
+      const lote = this.diaDoLote(venc) || venc;
+      return lote === dia || venc === dia;
+    });
+  },
+
+  gruposCartaoEmpresa(itens) {
+    const mapa = new Map();
+    (itens || []).forEach((it) => {
+      const id = String(it.companyId || "");
+      if (!mapa.has(id)) mapa.set(id, { key: "__cartao@" + id, empresaConta: id, itens: [], conta: null });
+      mapa.get(id).itens.push(it);
+    });
+    return [...mapa.values()];
+  },
+
+  cartaoPainelHtml(itens) {
+    if (!itens.length) return "";
+    const total = itens.reduce((t, it) => t + this.valorPagar(it), 0);
+    const linhas = itens.map((it) => `<tr class="gp-click" onclick="GerarPagamentoApp.abrirResumo('${this.esc(it.chave)}')" title="Abrir o título">
+      <td>${this.dataBr(it.vencimento)}</td>
+      <td>${this.esc(it.titulo)}/${this.esc(it.parcela || 1)}</td>
+      <td>${this.esc(it.credor || "")}</td>
+      <td>${this.esc(it.documento || "")}</td>
+      <td style="text-align:right;">${this.money(this.valorPagar(it))}</td>
+      <td><span class="bchk bchk-info">Cartão de crédito</span></td>
+    </tr>`).join("");
+    return `<section class="gp-lotes-painel gp-cartao">
+      <header class="gp-lotes-topo">
+        <div>
+          <h3>Cartão de crédito</h3>
+          <p>${itens.length} título(s) · ${this.money(total)}. A forma no Sienge é cartão de crédito, então não entram no lote do banco.</p>
+        </div>
+      </header>
+      <div style="overflow:auto;">
+        <table class="gp-table gp-titulos gp-card-tab">
+          <thead><tr><th>Vencimento</th><th>Título</th><th>Credor</th><th>Documento</th><th style="text-align:right;">A pagar</th><th>Pagamento</th></tr></thead>
+          <tbody>${linhas}</tbody>
+        </table>
+      </div>
+    </section>`;
+  },
+
   resumoEmLoteHtml(g) {
     const linhas = (g.itens || []).map((it) => this.linhaTituloHtml(it, it.chave)).join("");
     return `<div class="gp-lote-linhas">${linhas}</div>`;
@@ -3816,21 +3892,24 @@ const GerarPagamentoApp = {
       </article>`;
     };
     const noPeriodo = (dia) => this.noPeriodoBuscado(dia);
-    const aGerarTodos = grupos.map((g) => ({ ...g, itens: g.itens.filter((it) => !it.emLote) })).filter((g) => g.itens.length);
+    const aGerarTodos = grupos.filter((g) => g.key !== "__cartao").map((g) => ({ ...g, itens: g.itens.filter((it) => !it.emLote) })).filter((g) => g.itens.length);
     const diasRetro = this.diasRetroPendentes(aGerarTodos);
     if (s.diaRetro && !diasRetro.some((d) => d.dia === s.diaRetro)) s.diaRetro = "";
     const aGerar = this.recortarGrupos(aGerarTodos, noPeriodo);
     const aGerarRetro = s.diaRetro ? this.recortarGrupos(aGerarTodos, (dia) => dia === s.diaRetro) : [];
     const emLote = this.recortarGrupos(
-      grupos.map((g) => ({ ...g, key: g.key + "#lote", itens: g.itens.filter((it) => it.emLote) })).filter((g) => g.itens.length),
+      grupos.map((g) => ({ ...g, key: g.key + "#lote", itens: g.itens.filter((it) => it.emLote) })).filter((g) => g.itens.length && g.key !== "__cartao#lote"),
       noPeriodo);
-    const fonteEmpresa = (s.diaRetro ? aGerarRetro : aGerar).concat(emLote);
+    const cartaoVista = this.itensCartao(grupos, s.diaRetro);
+    const fonteEmpresa = (s.diaRetro ? aGerarRetro : aGerar.concat(emLote)).concat(this.gruposCartaoEmpresa(cartaoVista));
     const baseStatus = s.diaRetro ? aGerarRetro : aGerar;
     const abasEmpresa = this.abasEmpresaHtml(fonteEmpresa, baseStatus);
     const emp = this.state.abaEmpresa;
     const soEmpresa = (lista) => this.filtrarEmpresa(lista, emp);
     const aGerarVis = soEmpresa(aGerar);
     const retroVis = soEmpresa(aGerarRetro);
+    const cartaoVis = cartaoVista.filter((it) => !emp || String(it.companyId || "") === emp);
+    const painelCartao = this.cartaoPainelHtml(cartaoVis);
     const faixa = (extra) => `<div class="gp-faixa">${abasEmpresa}${extra || ""}</div>`;
     const vazio = (txt) => `<div style="padding:22px 20px;color:#64748b;font-size:0.85rem;">${txt}</div>`;
     const chaves = new Set(s.titulos.filter((r) => noPeriodo(String(r.vencimento || "").slice(0, 10))).map((r) => this.chaveTitulo(r.titulo, r.parcela)));
@@ -3863,7 +3942,8 @@ const GerarPagamentoApp = {
           <button type="button" class="btn btn-outline btn-sm" onclick="GerarPagamentoApp.setDiaRetro('')"><i data-lucide="arrow-left" style="width:14px;height:14px;"></i> Voltar ao período ${this.dataBr(s.startDate)}${s.endDate !== s.startDate ? " a " + this.dataBr(s.endDate) : ""}</button>
         </div>
         ${this.resumoAGerarHtml(retroVis)}
-        <div class="gp-lotes-painel" style="margin-top:0;">${retroVis.map(card).join("")}</div>`;
+        <div class="gp-lotes-painel" style="margin-top:0;">${retroVis.map(card).join("")}</div>
+        ${painelCartao}`;
     } else {
       const vazioPeriodo = this.state.titulos.some((r) => noPeriodo(String(r.vencimento || "").slice(0, 10)) && !r.pago && r.aPagar > 0.009)
         ? "Nenhum título a gerar lote nesta empresa no período: todos já estão em lote."
@@ -3871,7 +3951,7 @@ const GerarPagamentoApp = {
       const blocoAGerar = this.resumoAGerarHtml(aGerarVis) + (aGerarVis.length
         ? `<div class="gp-lotes-painel" style="margin-top:0;">${aGerarVis.map(card).join("")}</div>`
         : vazio(vazioPeriodo));
-      corpo = `${faixa()}${alerta}${blocoAGerar}`;
+      corpo = `${faixa()}${alerta}${blocoAGerar}${painelCartao}`;
     }
     return `${this.conferenciaHtml()}${abasLote}${corpo}`;
   },

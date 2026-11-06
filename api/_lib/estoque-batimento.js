@@ -502,6 +502,7 @@ async function handler(req, res) {
       state.done = false;
       state.saldoSeen = [];
       state.saldoFalhas = {};
+      state.censoFalhas = {};
     }
     const continuacao = flag(req, "cont") === "1";
     if (!force && !continuacao && Number(state.passes) > 0) {
@@ -520,6 +521,7 @@ async function handler(req, res) {
     state.touchedAt = new Date().toISOString();
     state.passes = (Number(state.passes) || 0) + 1;
     if (!state.obraFalhas || typeof state.obraFalhas !== "object") state.obraFalhas = {};
+    if (!state.censoFalhas || typeof state.censoFalhas !== "object") state.censoFalhas = {};
     await setDoc(doc(db, FB_COL, STATE_ID), { ...state, done: false });
 
     let units = await loadUnits();
@@ -671,11 +673,18 @@ async function handler(req, res) {
         i += batch.length;
         const results = await Promise.allSettled(batch.map((cid) => fetchCustomer(cid)));
         results.forEach((r, k) => {
-          seen.add(String(batch[k]));
-          if (r.status === "fulfilled") processed += 1;
-          else {
+          const cid = String(batch[k]);
+          if (r.status === "fulfilled") {
+            seen.add(cid);
+            delete state.censoFalhas[cid];
+            processed += 1;
+          } else {
+            // Cliente que falhou (ex.: 429 do Sienge) volta na próxima passada. Depois de 3 falhas segue sem ele, para o dia fechar.
             failed += 1;
-            log.push(`cliente ${batch[k]}: ${(r.reason && r.reason.message) || r.reason}`);
+            const nFail = (Number(state.censoFalhas[cid]) || 0) + 1;
+            state.censoFalhas[cid] = nFail;
+            if (nFail >= 3) seen.add(cid);
+            log.push(`cliente ${cid}: ${(r.reason && r.reason.message) || r.reason}`);
           }
         });
       }

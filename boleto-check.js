@@ -202,8 +202,15 @@ window.BoletoCheck = {
   },
 
   /** Endpoints de payment-information na ordem provável para a forma da parcela; especifico = a forma do Sienge aponta um endpoint. */
+  ehCartao(tipo) {
+    const t = String(tipo || "");
+    if (/cr[eé]dito em conta/i.test(t)) return false;
+    return /cart[aã]o/i.test(t);
+  },
+
   tiposForma(tipo) {
     const t = String(tipo || "");
+    if (this.ehCartao(t)) return { kinds: [], especifico: true, cartao: true };
     if (/pix/i.test(t)) return { kinds: ["pix"], especifico: true };
     if (/transf|ted\b|doc\b|cr[eé]dito em conta|dep[oó]sito/i.test(t)) return { kinds: ["bank-transfer"], especifico: true };
     if (/concession|consumo|arrecad|tribut|guia|darf|gps|fgts|imposto/i.test(t)) return { kinds: ["boleto-concessionaria", "boleto-tax", "boleto-bancario"], especifico: true };
@@ -247,7 +254,7 @@ window.BoletoCheck = {
         nome = "";
       }
     }
-    const { kinds, especifico } = this.tiposForma(nome);
+    const { kinds, especifico, cartao } = this.tiposForma(nome);
     let falhou = false;
     let principal = null;
     const montar = (kind, data) => {
@@ -255,6 +262,7 @@ window.BoletoCheck = {
       if (parcelaObj) payment.extra = Object.assign(payment.extra, this.escalares(parcelaObj));
       return payment;
     };
+    if (cartao) return montar("cartao", {});
     for (let i = 0; i < kinds.length; i++) {
       let data;
       try {
@@ -310,6 +318,12 @@ window.BoletoCheck = {
       return out;
     }
     const d = payment.data || {};
+    if (payment.kind === "cartao") {
+      out.nivel = "info";
+      out.forma = "Cartão de crédito";
+      out.resumo = "Cartão de crédito. Este título não entra no lote de pagamento do banco.";
+      return out;
+    }
     if (payment.kind === "pix") return this.validarPix(payment, ctx.credor, out);
     if (!this.ehBoleto(payment)) {
       out.nivel = "info";

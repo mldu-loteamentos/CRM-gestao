@@ -490,6 +490,38 @@ window.NotaFiscalCheck = {
   },
 
   /**
+   * Beneficiário impresso no boleto. "Agência / Código do Beneficiário" não é o nome,
+   * e o CNPJ que vem depois de Pagador é de quem paga — não entra na comparação.
+   */
+  cnpjBeneficiarioNoTexto(texto) {
+    const t = String(texto || "");
+    if (!t) return "";
+    const pagadorEm = (() => {
+      const re = /\bpagador\b|\bsacado\b/gi;
+      let m;
+      while ((m = re.exec(t))) {
+        const antes = t.slice(Math.max(0, m.index - 16), m.index);
+        if (/recibo\s+do\s+$/i.test(antes)) continue;
+        return m.index;
+      }
+      return -1;
+    })();
+    const re = /\d{2}\s*\.\s*\d{3}\s*\.\s*\d{3}\s*\/\s*\d{4}\s*-\s*\d{2}|\d{3}\s*\.\s*\d{3}\s*\.\s*\d{3}\s*-\s*\d{2}/g;
+    const docs = [];
+    let achado;
+    while ((achado = re.exec(t))) docs.push({ i: achado.index, doc: this.digits(achado[0]) });
+    const doPagador = pagadorEm >= 0 ? docs.find((d) => d.i >= pagadorEm && d.i < pagadorEm + 500) : null;
+    const serve = (doc) => doc && (!doPagador || doc !== doPagador.doc);
+    const limpo = t.replace(/c[oó]digo do benefici[aá]rio/gi, " ");
+    const apos = this.cnpjApos(limpo, /benefici[aá]rio|cedente/i);
+    if (serve(apos)) return apos;
+    const flex = limpo.match(/(?:benefici[aá]rio|cedente)[\s\S]{0,400}?(\d{2}\s*\.\s*\d{3}\s*\.\s*\d{3}\s*\/\s*\d{4}\s*-\s*\d{2}|\d{3}\s*\.\s*\d{3}\s*\.\s*\d{3}\s*-\s*\d{2})/i);
+    if (flex && serve(this.digits(flex[1]))) return this.digits(flex[1]);
+    const antes = (pagadorEm > 0 ? docs.filter((d) => d.i < pagadorEm) : docs).find((d) => serve(d.doc));
+    return antes ? antes.doc : "";
+  },
+
+  /**
    * NFS-e de São Paulo (e notas parecidas) não traz o campo "ISS retido".
    * O rodapé diz "o ISS será RETIDO pelo Tomador" e a discriminação traz "RETENÇÃO DE ISS".
    * O INSS sai na coluna "Contribuição Previdenciária - Retida (R$)", ou em "RETENÇÃO DE INSS".
@@ -627,7 +659,7 @@ window.NotaFiscalCheck = {
         const inicio = new TextDecoder("latin1").decode(new Uint8Array(buf.slice(0, 64))).trim();
         if (!/^%PDF/.test(inicio)) continue;
         const texto = this.textoPdf(await this.itensDoPdf(buf));
-        doc = this.cnpjApos(texto, /benefici[aá]rio|cedente/i);
+        doc = this.cnpjBeneficiarioNoTexto(texto);
         if (doc) break;
       }
     } catch (e) {

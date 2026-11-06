@@ -46176,11 +46176,24 @@ window.abrirMapaKmz = async function(empId) {
 
 window._kmzListaOrdem = window._kmzListaOrdem || { campo: "id", dir: 1 };
 
+function kmzCentrosNoNavegador() {
+  if (Array.isArray(window._kmzCentrosLocal)) return window._kmzCentrosLocal;
+  try {
+    const parsed = JSON.parse(localStorage.getItem("crm_cost_centers_data") || "null");
+    window._kmzCentrosLocal = Array.isArray(parsed) ? parsed : [];
+  } catch (e) {
+    window._kmzCentrosLocal = [];
+  }
+  return window._kmzCentrosLocal;
+}
+
 function kmzNomeCentro(id) {
   const listas = [];
   if (Array.isArray(window._mapaPlantaCentros)) listas.push(window._mapaPlantaCentros);
   const app = window.AppState && (AppState.cachedCostCenters || AppState.costCenters);
   if (Array.isArray(app)) listas.push(app);
+  const local = kmzCentrosNoNavegador();
+  if (local.length) listas.push(local);
   for (let i = 0; i < listas.length; i++) {
     const hit = listas[i].find((c) => c && String(c.id) === String(id));
     const nome = hit && (hit.name || hit.description);
@@ -46239,19 +46252,26 @@ window.kmzOrdenarLista = function(campo) {
   kmzPintarLista();
 };
 
+function kmzHtmlCarregando() {
+  return '<tr><td colspan="5" class="kmz-carregando"><div class="ml-load kmz-load"><div class="loading-spinner" aria-hidden="true"></div><div class="loading-status-text">Carregando centros de custo…</div><div class="ml-load-track"><div class="loading-progress-bar"></div></div></div></td></tr>';
+}
+
 async function loadKMZList() {
   const corpos = ["kmz-list-body", "satelite-list-body"].map((id) => document.getElementById(id)).filter(Boolean);
   if (!corpos.length) return;
   corpos.forEach((body) => {
-    body.innerHTML = '<tr><td colspan="5" class="is-center">Carregando centros de custo...</td></tr>';
+    body.innerHTML = kmzHtmlCarregando();
   });
 
   try {
-    if (window.mapaPlantaCarregarCentros) {
-      try { await window.mapaPlantaCarregarCentros(); } catch (e) {}
+    const { collection, getDocs, query, select } = window.firebaseCollections;
+    const base = collection(window.firebaseDb, "kmz_coordinates");
+    let querySnapshot;
+    try {
+      querySnapshot = await getDocs(query(base, select("empreendimento_id", "count", "quadraCount")));
+    } catch (e) {
+      querySnapshot = await getDocs(base);
     }
-    const { collection, getDocs } = window.firebaseCollections;
-    const querySnapshot = await getDocs(collection(window.firebaseDb, "kmz_coordinates"));
     const porId = {};
     querySnapshot.forEach((docSnap) => {
       const item = docSnap.data() || {};
@@ -46266,6 +46286,16 @@ async function loadKMZList() {
     });
     window._kmzLista = Object.keys(porId).map((id) => porId[id]);
     kmzPintarLista();
+    const semNome = (window._kmzLista || []).some((r) => !r.nome);
+    if (semNome && typeof window.mapaPlantaCarregarCentros === "function") {
+      window.mapaPlantaCarregarCentros().then(() => {
+        (window._kmzLista || []).forEach((r) => {
+          const nome = kmzNomeCentro(r.id);
+          if (nome) r.nome = nome;
+        });
+        kmzPintarLista();
+      }).catch(() => {});
+    }
   } catch (error) {
     console.error("Erro ao carregar lista de KMZ:", error);
     corpos.forEach((body) => {
