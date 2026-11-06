@@ -15395,8 +15395,9 @@ function formatCpfCnpj(val) {
       <i data-lucide="copy" style="width: 13px; height: 13px; color: var(--color-primary);"></i>
     </button><button type="button" id="det-abrir-lote" class="btn-icon-ge" disabled style="border:none;padding:4px 8px;display:inline-flex;align-items:center;gap:4px;border-radius:4px;font-size:0.75rem;font-weight:bold;background:#e2e8f0;color:#475569;">Abrir Lote</button></span>`;
     
-    // Buscar coordenadas do KMZ para exibir o botão do Google Earth
-    if (empIdToUse !== "N/D") {
+    // Buscar coordenadas do KMZ para exibir o botão do Google Earth.
+    // Sem o Firebase a ficha segue com os dados do Sienge (título, datas e valores).
+    if (empIdToUse !== "N/D" && window.firebaseDb && window.firebaseCollections && window.firebaseCollections.doc && window.firebaseCollections.getDoc) {
       const { doc, getDoc } = window.firebaseCollections;
       const kmzRef = doc(window.firebaseDb, 'kmz_coordinates', empIdToUse);
       getDoc(kmzRef).then(async docSnap => {
@@ -46264,14 +46265,9 @@ async function loadKMZList() {
   });
 
   try {
-    const { collection, getDocs, query, select } = window.firebaseCollections;
+    const { collection, getDocs } = window.firebaseCollections;
     const base = collection(window.firebaseDb, "kmz_coordinates");
-    let querySnapshot;
-    try {
-      querySnapshot = await getDocs(query(base, select("empreendimento_id", "count", "quadraCount")));
-    } catch (e) {
-      querySnapshot = await getDocs(base);
-    }
+    const querySnapshot = await getDocs(base);
     const porId = {};
     querySnapshot.forEach((docSnap) => {
       const item = docSnap.data() || {};
