@@ -2717,7 +2717,6 @@ const OrcamentoDfcApp = {
     if (id === "2" && !(this._v2 && Array.isArray(this._v2.lines) && this._v2.lines.length)) return;
     this.versao = id === "2" ? "2" : "1";
     this._versaoEscolhida = true;
-    this.selectedCompanyIds = [];
     this.selectedCcIds = [];
     this.selectedPlanIds = [];
     this.selectedGrupoIds = [];
