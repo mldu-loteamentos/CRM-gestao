@@ -15132,15 +15132,15 @@ function formatCpfCnpj(val) {
         <span style="font-size: 0.9rem; color: var(--color-text-muted);">Buscando anexos...</span>
       </div>
     `;
-    const assistenteBtnHtml = `
-      <div class="cc-toolbar">
-        <div class="cc-toolbar-actions">
-          <button type="button" class="btn btn-primary cc-atualizar" onclick="window.abrirAnexosParaJuridico(${customerId})">
-            <i data-lucide="paperclip" style="width: 16px; height: 16px;"></i> Buscar mais anexos
-          </button>
-        </div>
+    const anexosTopo = (titulo) => `
+      <div class="ficha-anexos-topo">
+        <span class="ficha-anexos-titulo">${titulo}</span>
+        <button type="button" class="btn btn-primary ficha-anexos-buscar" onclick="window.abrirAnexosParaJuridico(${customerId})">
+          <i data-lucide="paperclip" style="width: 14px; height: 14px;"></i> Buscar mais anexos
+        </button>
       </div>
     `;
+    const assistenteBtnHtml = anexosTopo("Anexos");
 
     (async function loadFichaAnexos() {
       let rows = [];
@@ -15232,9 +15232,10 @@ function formatCpfCnpj(val) {
              </tr>
            `;
          }).join("");
-         detAnexosEl.innerHTML = `<div class="cc-page">
-           ${assistenteBtnHtml}
-           <div class="cc-scroll">
+         const qtdAnexos = attRes.results.length;
+         detAnexosEl.innerHTML = `<div class="ficha-anexos">
+           ${anexosTopo(qtdAnexos === 1 ? "1 anexo" : qtdAnexos + " anexos")}
+           <div class="cc-scroll ficha-anexos-lista">
              <table class="cc-table">
                <colgroup><col><col style="width:64px"></colgroup>
                <thead><tr>

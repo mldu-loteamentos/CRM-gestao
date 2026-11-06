@@ -677,21 +677,147 @@ function anexosPartesNormalizadas(cedentes, cessionarios) {
   return { ok: ced.length > 0 && ces.length > 0, cedentes: ced, cessionarios: ces };
 }
 
-async function anexosTextoPdf(buf) {
+async function anexosTextoPdf(buf, maxPages) {
   const pdfjsLib = window["pdfjs-dist/build/pdf"];
   if (!pdfjsLib || !buf) return "";
   const pdf = await pdfjsLib.getDocument({ data: buf.slice(0) }).promise;
   try {
-    const n = Math.min(pdf.numPages || 1, 2);
+    const total = pdf.numPages || 1;
+    const limite = maxPages || 2;
+    const idxs = [];
+    for (let i = 1; i <= Math.min(total, limite); i++) idxs.push(i);
+    if (total > limite) idxs.push(total);
     let texto = "";
-    for (let i = 1; i <= n; i++) {
-      const page = await pdf.getPage(i);
+    for (let p = 0; p < idxs.length; p++) {
+      const page = await pdf.getPage(idxs[p]);
       const content = await page.getTextContent();
       texto += (content.items || []).map((it) => it.str || "").join(" ") + "\n";
     }
     return texto;
   } finally {
     try { pdf.destroy(); } catch (e) {}
+  }
+}
+
+function anexosTagEhTcd(tags) {
+  return (tags || []).some((t) => {
+    const n = anexosFoldTag(t);
+    return n === "TCD" || /\bTCD\b/.test(n);
+  });
+}
+
+function anexosIsoValida(iso) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(iso)) return "";
+  const dt = new Date(iso + "T12:00:00");
+  const [y, m, d] = iso.split("-").map(Number);
+  if (isNaN(dt.getTime()) || dt.getFullYear() !== y || dt.getMonth() + 1 !== m || dt.getDate() !== d) return "";
+  if (y < 1990 || y > new Date().getFullYear() + 5) return "";
+  return iso;
+}
+
+function anexosIsoDePartes(d, m, y) {
+  const iso = String(y) + "-" + String(m).padStart(2, "0") + "-" + String(d).padStart(2, "0");
+  return anexosIsoValida(iso);
+}
+
+/** Data do acordo no texto do TCD. Ignora data de nascimento. */
+function anexosDataAcordoTcd(texto, nomeArquivo) {
+  const fold = anexosTextoCessao(texto);
+  const meses = {
+    JANEIRO: 1, FEVEREIRO: 2, MARCO: 3, ABRIL: 4, MAIO: 5, JUNHO: 6,
+    JULHO: 7, AGOSTO: 8, SETEMBRO: 9, OUTUBRO: 10, NOVEMBRO: 11, DEZEMBRO: 12
+  };
+  const perto = (idx, re, janela) => {
+    const a = Math.max(0, idx - janela);
+    const b = Math.min(fold.length, idx + 40);
+    return re.test(fold.slice(a, b));
+  };
+  const marca = /\b(ACORDO|FIRMAD\w*|CELEBRAD\w*|ASSINAD\w*|NESTA DATA|DATA DO|TERMO DE CONFISSAO)\b/;
+  const nasc = /\b(NASC\w*|DATA DE NASCIMENTO)\b/;
+  const candidatos = [];
+  const guarda = (idx, iso) => {
+    if (!iso || perto(idx, nasc, 40)) return;
+    let score = 1;
+    if (perto(idx, marca, 90)) score += 100;
+    candidatos.push({ iso, score, idx });
+  };
+  const reNum = /\b(0?[1-9]|[12]\d|3[01])[\/.\-](0?[1-9]|1[0-2])[\/.\-](\d{4})\b/g;
+  let m;
+  while ((m = reNum.exec(fold))) guarda(m.index, anexosIsoDePartes(m[1], m[2], m[3]));
+  const reExt = /\b(0?[1-9]|[12]\d|3[01])\s+DE\s+(JANEIRO|FEVEREIRO|MARCO|ABRIL|MAIO|JUNHO|JULHO|AGOSTO|SETEMBRO|OUTUBRO|NOVEMBRO|DEZEMBRO)\s+DE\s+(\d{4})\b/g;
+  while ((m = reExt.exec(fold))) guarda(m.index, anexosIsoDePartes(m[1], meses[m[2]], m[3]));
+  const reIso = /\b(\d{4})[.\-](\d{2})[.\-](\d{2})\b/g;
+  while ((m = reIso.exec(fold))) guarda(m.index, anexosIsoDePartes(m[3], m[2], m[1]));
+  candidatos.sort((a, b) => b.score - a.score || b.idx - a.idx);
+  if (candidatos.length && candidatos[0].score > 1) return candidatos[0].iso;
+  const doNome = anexosDataAcordoTcdNome(nomeArquivo);
+  if (doNome) return doNome;
+  return candidatos.length ? candidatos[0].iso : "";
+}
+
+function anexosDataAcordoTcdNome(nome) {
+  const fold = anexosTextoCessao(nome);
+  const m = fold.match(/\b(0?[1-9]|[12]\d|3[01])[\/.\-](0?[1-9]|1[0-2])[\/.\-](\d{4})\b/);
+  return m ? anexosIsoDePartes(m[1], m[2], m[3]) : "";
+}
+
+function anexosRotuloTcd(iso, ordem) {
+  const br = anexosStoredToBr(iso);
+  return br + " - " + ordem + "\u00ba TCD";
+}
+
+function anexosTcdJaNaUnidade() {
+  const rows = AnexosState.contractAttachments || [];
+  const datas = [];
+  rows.forEach((a) => {
+    const nome = String((a && (a.name || a.fileName)) || "");
+    const desc = String((a && a.description) || "");
+    const blob = desc + " " + nome;
+    if (!/\bTCD\b/i.test(blob)) return;
+    const iso = anexosDataAcordoTcd(nome, nome) || anexosDataAcordoTcd(desc, desc);
+    if (iso && datas.indexOf(iso) < 0) datas.push(iso);
+  });
+  return datas;
+}
+
+function anexosAplicarRotulosTcd(files) {
+  const tcds = (files || []).filter((f) => f && anexosTagEhTcd(f.tags) && f._tcdData);
+  const datas = tcds.map((f) => f._tcdData).concat(anexosTcdJaNaUnidade());
+  const ordem = [...new Set(datas)].sort();
+  tcds.forEach((f) => {
+    const n = ordem.indexOf(f._tcdData) + 1;
+    f._tcdRotulo = n > 0 ? anexosRotuloTcd(f._tcdData, n) : "";
+  });
+}
+
+async function anexosPrepararTcd(fileObj) {
+  if (!fileObj || fileObj._tcdLendo || fileObj._tcdPronto) return;
+  if (!anexosTagEhTcd(fileObj.tags)) return;
+  fileObj._tcdLendo = true;
+  try {
+    let hash = "";
+    let buf = null;
+    if (fileObj.file && fileObj.file.size > 0) {
+      buf = new Uint8Array(await fileObj.file.arrayBuffer());
+      if (window.AnexosApp && typeof AnexosApp.sha256Arquivo === "function") {
+        hash = await AnexosApp.sha256Arquivo(buf);
+      }
+    }
+    let data = "";
+    if (buf && String(fileObj.ext || "").toLowerCase() === "pdf") {
+      data = anexosDataAcordoTcd(await anexosTextoPdf(buf, 4), fileObj.originalName || "");
+    }
+    if (!data) data = anexosDataAcordoTcdNome(fileObj.originalName || "");
+    fileObj._arquivoHash = hash;
+    fileObj._tcdData = data;
+  } catch (e) {
+    fileObj._tcdData = anexosDataAcordoTcdNome(fileObj.originalName || "");
+  } finally {
+    fileObj._tcdLendo = false;
+    fileObj._tcdPronto = true;
+    anexosAplicarRotulosTcd(AnexosState.files);
+    if (window.AnexosApp && typeof AnexosApp.renderFilesList === "function") AnexosApp.renderFilesList();
+    if (window.AnexosApp && typeof AnexosApp.checkCanSend === "function") AnexosApp.checkCanSend();
   }
 }
 
@@ -3959,10 +4085,12 @@ const AnexosApp = {
       }
       const previewHtml = anexosThumbHtml(f);
 
-      const tagLabel = f.tags.join('-') || 'SEM_TAG';
+      const tagLabel = f._tcdRotulo || f.tags.join('-') || 'SEM_TAG';
       let duplicateSuffix = '';
-      const duplicatesBefore = AnexosState.files.slice(0, index).filter(x => x.tags.join('-') === tagLabel).length;
-      if (duplicatesBefore > 0) duplicateSuffix = `(${duplicatesBefore})`;
+      if (!f._tcdRotulo) {
+        const duplicatesBefore = AnexosState.files.slice(0, index).filter(x => x.tags.join('-') === f.tags.join('-')).length;
+        if (duplicatesBefore > 0) duplicateSuffix = `(${duplicatesBefore})`;
+      }
       
       const ccStr = AnexosState.cc || document.getElementById('anexos-cc')?.value || '';
       const unitSelect = document.getElementById('anexos-unidade');
@@ -3984,12 +4112,13 @@ const AnexosApp = {
       
       const nomeFinal = `${prefix} - ${tagLabel}${duplicateSuffix}${dataSuffixView}.${extVisual}`;
       
-      const chipsHtml = f.tags.map(t => 
-        `<span style="display: inline-flex; align-items: center; gap: 5px; background: #e2e8f0; color: #334155; padding: 3px 10px; border-radius: 16px; font-size: 0.8rem; font-weight: 500;">
-          ${t}
+      const chipsHtml = f.tags.map(t => {
+        const vis = anexosTagEhTcd([t]) && f._tcdRotulo ? f._tcdRotulo : t;
+        return `<span style="display: inline-flex; align-items: center; gap: 5px; background: #e2e8f0; color: #334155; padding: 3px 10px; border-radius: 16px; font-size: 0.8rem; font-weight: 500;">
+          ${vis}
           <span onclick="AnexosApp.removeTag('${f.id}', '${t}')" style="cursor: pointer; font-size: 1.1rem; line-height: 1; opacity: 0.6; margin-left: 2px; padding: 0 2px; border-radius: 50%; background: #cbd5e1; color: #475569;" title="Remover tag">&times;</span>
-        </span>`
-      ).join('');
+        </span>`;
+      }).join('');
 
       const allowedDestino = AnexosState.contexto === 'Ambos' ? null : AnexosState.contexto;
       const escTag = (s) => String(s == null ? "" : s).replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;");
@@ -4180,6 +4309,10 @@ const AnexosApp = {
 
     if (!file.tags.includes(resolved)) {
       file.tags = [resolved];
+      file._tcdPronto = false;
+      file._tcdData = "";
+      file._tcdRotulo = "";
+      file._arquivoHash = "";
       if (file.autoTagged && file.tagFeedback === 'pending' && String(resolved) !== String(file.autoTag || '')) {
         file.tagFeedback = 'changed';
       }
@@ -4205,6 +4338,10 @@ const AnexosApp = {
     if (!file) return;
 
     file.tags = file.tags.filter(t => t !== tag);
+    file._tcdPronto = false;
+    file._tcdData = "";
+    file._tcdRotulo = "";
+    file._arquivoHash = "";
     if (file.tagFeedback === 'pending') file.tagFeedback = 'changed';
     this.evalFileStatus(file);
     this.renderFilesList();
@@ -4347,13 +4484,23 @@ const AnexosApp = {
     
     // Verifica duplicidades
     const seenKeys = new Set();
+    const tcdDocs = new Set();
+    const tcdDatas = new Set();
     let hasDuplicates = false;
     let hasCessaoIgual = false;
     let cessaoPendente = false;
+    let tcdPendente = false;
+    let hasTcdIgual = false;
+    let hasTcdMesmaData = false;
+    let hasTcdSemData = false;
+    let hasTcdNaUnidade = false;
     let hasMissingTarget = false;
     const prontos = AnexosState.files.filter(f => f.status === 'Pronto' || f.status === 'Enviado' || isModal);
     const cessoes = prontos.filter(f => anexosTagEhCessao(f.tags));
     const comparaCessao = cessoes.length > 1;
+    const tcds = prontos.filter(f => anexosTagEhTcd(f.tags));
+    const comparaTcd = tcds.length > 1;
+    const datasNaUnidade = anexosTcdJaNaUnidade();
     
     AnexosState.files.forEach(f => {
       if (f.status === 'Pronto' || f.status === 'Enviado' || isModal) {
@@ -4369,6 +4516,28 @@ const AnexosApp = {
             hasCessaoIgual = true;
           }
           seenKeys.add(uniqueKey);
+          return;
+        }
+        if (anexosTagEhTcd(f.tags)) {
+          if (!f._tcdPronto) {
+            anexosPrepararTcd(f);
+            tcdPendente = true;
+            return;
+          }
+          if (comparaTcd) {
+            const docKey = f._arquivoHash ? ("h:" + f._arquivoHash) : ("n:" + f.id);
+            if (tcdDocs.has(docKey)) {
+              hasDuplicates = true;
+              hasTcdIgual = true;
+            }
+            tcdDocs.add(docKey);
+            if (!f._tcdData) hasTcdSemData = true;
+            else if (tcdDatas.has(f._tcdData)) {
+              hasDuplicates = true;
+              hasTcdMesmaData = true;
+            } else tcdDatas.add(f._tcdData);
+          }
+          if (f._tcdData && datasNaUnidade.indexOf(f._tcdData) >= 0) hasTcdNaUnidade = true;
           return;
         }
         let mainTag = AnexosState.tagsAtivas.find(t => t.name === f.tags[0]);
@@ -4395,9 +4564,14 @@ const AnexosApp = {
 
     const needsTagConfirm = !isModal && AnexosState.files.some(anexosFileNeedsTagConfirm);
 
+    if (!tcdPendente) anexosAplicarRotulosTcd(AnexosState.files);
+
     const canSend = AnexosState.files.length > 0 && 
                     !hasDuplicates && 
                     !cessaoPendente &&
+                    !tcdPendente &&
+                    !hasTcdSemData &&
+                    !hasTcdNaUnidade &&
                     !hasMissingTarget &&
                     !needsTagConfirm &&
                     AnexosState.files.every(f => {
@@ -4424,10 +4598,20 @@ const AnexosApp = {
           hint.innerText = 'Selecione ao menos um cliente alvo para os documentos de Pessoa/Cliente';
         } else if (cessaoPendente) {
           hint.innerText = 'Conferindo cedentes e cessionários das cessões...';
+        } else if (tcdPendente) {
+          hint.innerText = 'Lendo as datas dos acordos nos TCD...';
+        } else if (hasTcdSemData) {
+          hint.innerText = 'Não encontrei a data do acordo em todos os TCD.';
+        } else if (hasTcdNaUnidade) {
+          hint.innerText = 'Já existe um TCD desta data de acordo na unidade.';
         } else if (hasDuplicates) {
           hint.innerText = hasCessaoIgual
             ? 'Erro: Já existe uma cessão com os mesmos cedentes e cessionários.'
-            : 'Erro: Você não pode usar a mesma TAG para a mesma pessoa/unidade.';
+            : (hasTcdIgual
+              ? 'Erro: há TCD iguais. Cada arquivo precisa ser um termo diferente.'
+              : (hasTcdMesmaData
+                ? 'Erro: os TCD precisam ter datas de acordo distintas.'
+                : 'Erro: Você não pode usar a mesma TAG para a mesma pessoa/unidade.'));
         } else if (needsTagConfirm) {
           hint.innerText = 'Confirme se a tag automática está correta (Acertei a tag?)';
         } else if (!isModal) {
@@ -4451,6 +4635,8 @@ const AnexosApp = {
     }
 
     if (isModal) {
+      anexosAplicarRotulosTcd(filesToSend);
+      filesToSend.forEach((f) => { if (f._tcdRotulo) f.tags = [f._tcdRotulo]; });
       AnexosDB.save(AnexosState.idCliente, filesToSend).then(() => {
         alert("Anexos salvos localmente com sucesso!");
         if (window.closeAnexosClienteModal) window.closeAnexosClienteModal();
@@ -4527,6 +4713,7 @@ const AnexosApp = {
     const cc = AnexosState.cc;
 
     const filesToSend = [...AnexosState.files.filter(f => f.status === 'Pronto' && !f.sentOk)];
+    anexosAplicarRotulosTcd(filesToSend);
 
     // Expande arquivos de Cliente em um envio por ID selecionado
     const uploadJobs = [];
@@ -4597,11 +4784,13 @@ const AnexosApp = {
       }
 
       // Montar nomes
-      const tagLabel = fileObj.tags.join('-') || 'DOC';
+      const tagLabel = fileObj._tcdRotulo || fileObj.tags.join('-') || 'DOC';
       let duplicateSuffix = '';
-      const originalIndex = AnexosState.files.findIndex(f => f.id === fileObj.id);
-      const duplicatesBefore = AnexosState.files.slice(0, originalIndex).filter(x => x.tags.join('-') === tagLabel).length;
-      if (duplicatesBefore > 0) duplicateSuffix = `(${duplicatesBefore})`;
+      if (!fileObj._tcdRotulo) {
+        const originalIndex = AnexosState.files.findIndex(f => f.id === fileObj.id);
+        const duplicatesBefore = AnexosState.files.slice(0, originalIndex).filter(x => x.tags.join('-') === fileObj.tags.join('-')).length;
+        if (duplicatesBefore > 0) duplicateSuffix = `(${duplicatesBefore})`;
+      }
       
       let unitNameStr = '';
       const unitSelect = document.getElementById('anexos-unidade');
@@ -4620,7 +4809,7 @@ const AnexosApp = {
       }
 
       let dataSuffix = '';
-      if (dataFormatada && dataFormatada.includes('.')) {
+      if (!fileObj._tcdRotulo && dataFormatada && dataFormatada.includes('.')) {
         const parts = dataFormatada.split('.');
         if (parts.length === 3) dataSuffix = ` ${parts[2]}.${parts[1]}.${parts[0]}`;
       }
@@ -4631,7 +4820,9 @@ const AnexosApp = {
       const prefix = destinoAPI === 'Cliente' ? idClienteStr : `${cc} ${unitName}`;
       const extFinal = fileObj.ext === 'jpeg' ? 'jpg' : fileObj.ext;
       const nomeFinalArquivo = anexosSafeFileName(`${prefix} - ${tagLabel}${duplicateSuffix}${dataSuffix}.${extFinal}`);
-      const descricaoSienge = `${dataFormatada} - ${String(tagLabel).replace(/[\\/]+/g, ' ')}`.replace(/\s+/g, ' ').trim();
+      const descricaoSienge = fileObj._tcdRotulo
+        ? fileObj._tcdRotulo
+        : `${dataFormatada} - ${String(tagLabel).replace(/[\\/]+/g, ' ')}`.replace(/\s+/g, ' ').trim();
       
       let apiUrl = '';
       
@@ -4742,7 +4933,7 @@ const AnexosApp = {
 
         // Ledger por contractId: permite reenvio após distrato (novo CV)
         if (destinoAPI !== 'Cliente' && AnexosState.activeContract && AnexosState.activeContract.id) {
-          const tagU = String(tagLabel || '').toUpperCase().split('-')[0].trim();
+          const tagU = fileObj._tcdRotulo ? "TCD" : String(tagLabel || '').toUpperCase().split('-')[0].trim();
           await anexosSaveMapaEnvio({
             enterpriseId: cc,
             unitId: AnexosState.selectedUnidade,
