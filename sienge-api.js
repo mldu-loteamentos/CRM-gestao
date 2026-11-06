@@ -3183,6 +3183,14 @@ const SiengeApiService = {
       return sit === "CANCELED" || sit === "CANCELADO" || sit === "DISTRATADO";
     };
     const usable = (c) => c && c.id != null && !isCanceled(c);
+    // Contrato de outra pessoa nunca serve: com o cliente informado, ele precisa estar entre os compradores.
+    const compradores = (c) => (Array.isArray(c && c.salesContractCustomers) ? c.salesContractCustomers : null);
+    const doCliente = (c) => {
+      if (!customerId) return true;
+      const lista = compradores(c);
+      if (!lista) return true;
+      return lista.some((x) => x && String(x.id != null ? x.id : x.customerId) === customerId);
+    };
     const looksLikeContractNumber = contractNumber && !/^\d{1,8}$/.test(contractNumber);
     // Título a receber (ex.: 16825) não é o id do sales-contract
     const salesContractId = rawId && rawId !== billId && /^\d+$/.test(rawId) ? rawId : "";
@@ -3202,12 +3210,11 @@ const SiengeApiService = {
       } catch (e) {}
     }
     if (looksLikeContractNumber) {
-      for (const key of ["number", "contractNumber"]) {
-        try {
-          const res = await siengeFetchWithRetry(`/sales-contracts?${key}=${encodeURIComponent(contractNumber)}&limit=50&offset=0`);
-          pushAll(res && res.results);
-        } catch (e) {}
-      }
+      // Só "number" filtra. O Sienge ignora "contractNumber" e devolve 50 contratos quaisquer.
+      try {
+        const res = await siengeFetchWithRetry(`/sales-contracts?number=${encodeURIComponent(contractNumber)}&limit=50&offset=0`);
+        pushAll(res && res.results);
+      } catch (e) {}
     }
     if (salesContractId) {
       try {
@@ -3217,7 +3224,7 @@ const SiengeApiService = {
     }
 
     const num = contractNumber.toUpperCase();
-    const scored = pool.map((c) => {
+    const scored = pool.filter(doCliente).map((c) => {
       let score = 0;
       if (billId && String(c.receivableBillId || c.billReceivableId || "") === billId) score += 8;
       const cn = String(c.contractNumber || c.number || "").toUpperCase().replace(/\s+/g, "");
@@ -3236,14 +3243,15 @@ const SiengeApiService = {
       return { c, score };
     }).sort((a, b) => b.score - a.score);
 
-    const best = (scored[0] && scored[0].score > 0) ? scored[0].c : (pool.filter(usable)[0] || null);
+    const best = (scored[0] && scored[0].score > 0) ? scored[0].c : (pool.filter((c) => usable(c) && doCliente(c))[0] || null);
     if (!best) return null;
-    if (best.salesContractCustomers || best.contractNumber || best.number) return best;
+    if (compradores(best)) return best;
     try {
       const full = await this.getContractRaw(best.id);
-      return full && full.id ? full : best;
+      if (full && full.id) return doCliente(full) ? full : null;
+      return customerId ? null : best;
     } catch (e) {
-      return best;
+      return customerId ? null : best;
     }
   },
 

@@ -15124,6 +15124,7 @@ function formatCpfCnpj(val) {
 
   // ----------------------------------------------------------------------
   // Preencher aba: Anexos
+  const fichaCtxToken = {};
   const detAnexosEl = document.getElementById("det-anexos-content");
   if (detAnexosEl) {
     detAnexosEl.innerHTML = `
@@ -15149,19 +15150,21 @@ function formatCpfCnpj(val) {
         rows = rows.concat((custAtt && custAtt.results) || []);
       } catch (e) {}
       try {
-        for (let i = 0; i < 20 && !AppState.currentContractNumber && !AppState.currentSalesContractId; i++) {
+        // Os dados do contrato em AppState só valem depois que ESTA ficha os gravou (senão sobram da ficha anterior).
+        for (let i = 0; i < 40 && AppState.currentContextToken !== fichaCtxToken; i++) {
           await new Promise((r) => setTimeout(r, 150));
         }
-        const titleId = String(AppState.currentReceivableBillId || AppState.selectedSaleId || saleId || '').replace(/^B-/i, '');
-        const contractNumber = String(AppState.currentContractNumber || '').trim();
+        const ctx = AppState.currentContextToken === fichaCtxToken ? AppState : {};
+        const titleId = String(ctx.currentReceivableBillId || saleId || '').replace(/^B-/i, '');
+        const contractNumber = String(ctx.currentContractNumber || '').trim();
         let contract = null;
         if (SiengeApiService.findSalesContract) {
           contract = await SiengeApiService.findSalesContract({
             customerId: customerId,
-            contractId: AppState.currentSalesContractId || '',
+            contractId: ctx.currentSalesContractId || '',
             contractNumber: contractNumber && !/^\d{1,8}$/.test(contractNumber) ? contractNumber : '',
             receivableBillId: titleId,
-            enterpriseId: AppState.currentCostCenterId || ''
+            enterpriseId: ctx.currentCostCenterId || ''
           });
         }
         if (contract && contract.id && SiengeApiService.getSalesContractAttachments) {
@@ -15357,6 +15360,7 @@ function formatCpfCnpj(val) {
   AppState.currentReceivableBillId = specificTitulo || sale.receivableBillId || saleId || sale.id || null;
   AppState.currentContractNumber = (contractNum && contractNum !== "N/D") ? contractNum : (sale.contractNumber || sale.number || null);
   AppState.currentSalesContractId = sale.id && String(sale.id) !== String(AppState.currentReceivableBillId) ? sale.id : (sale.salesContractId || null);
+  AppState.currentContextToken = fichaCtxToken;
 
   // In real mode, getCostCenter to get empreendimento name; in mock, use MOCK_DATA
   if (getSiengeApiMode() === "simulado") {
