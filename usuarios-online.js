@@ -23,6 +23,7 @@ const UsuariosOnline = {
   acessoEmail: "",
   acessoOpen: false,
   acessoQ: "",
+  recorte: "",
   sortAcesso: { campo: "ultimo", dir: 1 },
   cadastro: null,
 
@@ -414,10 +415,28 @@ const UsuariosOnline = {
     this.render();
   },
 
+  recorteAcesso(id) {
+    const alvo = id === "nunca" || id === "parado" ? id : "";
+    this.recorte = this.recorte === alvo ? "" : alvo;
+    this.acessoEmail = "";
+    this.acessoOpen = false;
+    this.render();
+  },
+
   filtroAcessoOpts() {
     const items = this.linhasAcesso(Date.now())
-      .sort((a, b) => a.nome.localeCompare(b.nome, "pt", { sensitivity: "base" }))
-      .map((u) => ({ id: u.email, label: String(u.nome || u.email).toUpperCase() }));
+      .sort((a, b) => {
+        const an = a.ultimo ? 1 : 0;
+        const bn = b.ultimo ? 1 : 0;
+        if (an !== bn) return an - bn;
+        return a.nome.localeCompare(b.nome, "pt", { sensitivity: "base" });
+      })
+      .map((u) => ({
+        id: u.email,
+        label: String(u.nome || u.email).toUpperCase(),
+        group: u.ultimo ? "Já acessaram" : "Nunca acessaram",
+        groupClass: u.ultimo ? "" : "is-nunca"
+      }));
     return {
       id: "uo-acesso-user",
       label: "Usuário",
@@ -599,16 +618,25 @@ const UsuariosOnline = {
       if (typeof va === "string") return va.localeCompare(vb, "pt", { sensitivity: "base" }) * dir;
       return (va - vb) * dir;
     });
-    const visiveis = this.acessoEmail ? ordenadas.filter((u) => u.email === this.acessoEmail) : ordenadas;
-    const nunca = linhas.filter((u) => !u.ultimo).length;
-    const parados = linhas.filter((u) => u.ultimo && now - u.ultimo > trinta).length;
+    const nuncaLista = linhas.filter((u) => !u.ultimo).sort((a, b) => a.nome.localeCompare(b.nome, "pt", { sensitivity: "base" }));
+    const paradosLista = linhas.filter((u) => u.ultimo && now - u.ultimo > trinta);
+    let base = ordenadas;
+    if (this.recorte === "nunca") base = ordenadas.filter((u) => !u.ultimo);
+    else if (this.recorte === "parado") base = ordenadas.filter((u) => u.ultimo && now - u.ultimo > trinta);
+    const visiveis = this.acessoEmail ? base.filter((u) => u.email === this.acessoEmail) : base;
     const th = (campoId, label, right) => `<th onclick="UsuariosOnline.ordenar('${campoId}')" style="cursor:pointer;user-select:none;padding:9px 12px;text-align:${right ? "right" : "left"};font-weight:700;white-space:nowrap;color:#105436;">${label} <i data-lucide="chevrons-up-down" style="width:11px;vertical-align:middle;"></i></th>`;
     const filtro = window.MlEmpresaFilter ? MlEmpresaFilter.html(this.filtroAcessoOpts()) : "";
-    const card = (label, value, color) => `
-      <div class="crm-card" style="padding:14px 16px;">
+    const card = (id, label, value, color) => {
+      const on = id ? this.recorte === id : !this.recorte;
+      return `<button type="button" class="crm-card" onclick="UsuariosOnline.recorteAcesso('${id}')" style="padding:14px 16px;text-align:left;cursor:pointer;font:inherit;width:100%;border:${on && id ? "2px solid " + color : "1px solid rgba(16, 84, 54, 0.05)"};box-shadow:${on && id ? "inset 0 0 0 1px " + color : "var(--shadow-sm)"};">
         <div style="font-size:0.72rem;color:#64748b;font-weight:700;text-transform:uppercase;">${label}</div>
         <div style="font-size:1.6rem;font-weight:800;color:${color};">${value}</div>
-      </div>`;
+      </button>`;
+    };
+    const chips = nuncaLista.map((u) => {
+      const on = u.email === this.acessoEmail;
+      return `<button type="button" data-email="${this.esc(u.email)}" onclick="UsuariosOnline.escolher(this.getAttribute('data-email'))" style="border:1px solid #fdba74;background:${on ? "#ffedd5" : "#fff"};color:#9a3412;font-weight:800;font-size:0.75rem;border-radius:999px;padding:4px 10px;cursor:pointer;">${this.esc(u.nome)}</button>`;
+    }).join("");
     const situacao = (u) => {
       if (u.online) return { texto: "Online agora", cor: "#105436" };
       if (!u.ultimo) return { texto: "Nunca acessou", cor: "#b45309" };
@@ -617,7 +645,8 @@ const UsuariosOnline = {
     const rows = visiveis.map((u) => {
       const sit = situacao(u);
       const sel = u.email === this.acessoEmail;
-      return `<tr data-email="${this.esc(u.email)}" onclick="UsuariosOnline.escolher(this.getAttribute('data-email'))" style="border-top:1px solid #eef2f6;cursor:pointer;background:${sel ? "#f0fdf4" : "transparent"};">
+      const fundo = sel ? "#f0fdf4" : (!u.ultimo ? "#fffbeb" : "transparent");
+      return `<tr data-email="${this.esc(u.email)}" onclick="UsuariosOnline.escolher(this.getAttribute('data-email'))" style="border-top:1px solid #eef2f6;cursor:pointer;background:${fundo};">
         <td style="padding:9px 12px;">
           <span style="display:block;font-weight:800;color:#0f172a;">${this.esc(u.nome)}</span>
           <span style="display:block;font-size:0.72rem;color:#64748b;">${this.esc(u.email)}</span>
@@ -651,19 +680,23 @@ const UsuariosOnline = {
           Cada entrada nova fica na lista da pessoa. O que já existia antes desta aba aparece como o último sinal.
         </p>
         <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:10px;margin-bottom:14px;">
-          ${card("Com acesso", linhas.length, "#0f172a")}
-          ${card("Nunca acessaram", nunca, "#b45309")}
-          ${card("Sem entrar há 30 dias", parados, "#64748b")}
+          ${card("", "Com acesso", linhas.length, "#0f172a")}
+          ${card("nunca", "Nunca acessaram", nuncaLista.length, "#b45309")}
+          ${card("parado", "Sem entrar há 30 dias", paradosLista.length, "#64748b")}
         </div>
+        ${nuncaLista.length ? `<div style="margin:-2px 0 14px;">
+          <div style="font-size:0.72rem;font-weight:800;color:#b45309;text-transform:uppercase;letter-spacing:0.03em;margin-bottom:6px;">Quem nunca acessou</div>
+          <div style="display:flex;flex-wrap:wrap;gap:6px;">${chips}</div>
+        </div>` : ""}
         <div style="max-width:360px;margin-bottom:14px;">${filtro}</div>
         <div class="crm-card" style="padding:0;overflow:hidden;margin-bottom:12px;">
-          <div style="padding:10px 14px;font-weight:800;color:#105436;border-bottom:1px solid #e2e8f0;">Quem tem acesso</div>
+          <div style="padding:10px 14px;font-weight:800;color:#105436;border-bottom:1px solid #e2e8f0;">${this.recorte === "nunca" ? "Nunca acessaram" : (this.recorte === "parado" ? "Sem entrar há 30 dias" : "Quem tem acesso")}</div>
           <div style="overflow:auto;">
             <table style="width:100%;border-collapse:collapse;font-size:0.82rem;">
               <thead><tr style="background:#f8fafc;">
                 ${th("nome", "Usuário")}${th("perfil", "Perfil")}${th("ultimo", "Último acesso", true)}${th("sessoes", "Entradas", true)}<th style="padding:9px 12px;text-align:right;font-weight:700;white-space:nowrap;color:#64748b;">Situação</th>
               </tr></thead>
-              <tbody>${rows || `<tr><td colspan="5" style="padding:18px;color:#94a3b8;text-align:center;">${this.cadastro ? "Nenhum usuário ativo." : "Carregando…"}</td></tr>`}</tbody>
+              <tbody>${rows || `<tr><td colspan="5" style="padding:18px;color:#94a3b8;text-align:center;">${!this.cadastro ? "Carregando…" : (this.recorte === "nunca" ? "Todo mundo que tem acesso já entrou." : (this.recorte === "parado" ? "Ninguém está há 30 dias sem entrar." : "Nenhum usuário ativo."))}</td></tr>`}</tbody>
             </table>
           </div>
         </div>
