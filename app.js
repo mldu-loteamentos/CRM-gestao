@@ -45631,25 +45631,33 @@ window.desenharQuadrasKmz = async function(map, empId) {
 
 window.kmzPontosEnquadramento = function(pontos) {
   const pts = (pontos || []).filter((p) => p && Number.isFinite(p[0]) && Number.isFinite(p[1]));
-  if (pts.length < 8) return pts;
-  const faixa = (vals) => {
+  if (pts.length < 4) return pts;
+  const med = (vals) => {
     const s = vals.slice().sort((a, b) => a - b);
-    const i0 = Math.max(0, Math.floor((s.length - 1) * 0.03));
-    const i1 = Math.min(s.length - 1, Math.ceil((s.length - 1) * 0.97));
-    return [s[i0], s[i1]];
+    const m = Math.floor(s.length / 2);
+    return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2;
   };
-  const lat = faixa(pts.map((p) => p[0]));
-  const lng = faixa(pts.map((p) => p[1]));
-  const dentro = pts.filter((p) => p[0] >= lat[0] && p[0] <= lat[1] && p[1] >= lng[0] && p[1] <= lng[1]);
-  return dentro.length >= 4 ? dentro : pts;
+  const lat0 = med(pts.map((p) => p[0]));
+  const lng0 = med(pts.map((p) => p[1]));
+  const dist = (p) => {
+    const dy = (p[0] - lat0) * 111320;
+    const dx = (p[1] - lng0) * 111320 * Math.cos(lat0 * Math.PI / 180);
+    return Math.hypot(dx, dy);
+  };
+  const ds = pts.map(dist).sort((a, b) => a - b);
+  const p90 = ds[Math.min(ds.length - 1, Math.floor((ds.length - 1) * 0.9))];
+  const limite = Math.max(350, Math.min(2200, p90 * 1.6));
+  const dentro = pts.filter((p) => dist(p) <= limite);
+  return dentro.length >= 3 ? dentro : pts;
 };
 
 window.kmzEtiquetaCurta = function(nome, empId) {
   let s = String(nome || "").trim();
   const id = String(empId || "").trim();
   if (id && s.toUpperCase().startsWith(id.toUpperCase())) {
-    s = s.slice(id.length).replace(/^[\s\-–—:]+/, "").trim();
+    s = s.slice(id.length).replace(/^[\s\-–—−‐:]+/, "").trim();
   }
+  s = s.replace(/^\d{4,6}\s*[-–—−‐:]\s*/, "");
   if (s.indexOf(" - ") >= 0) s = s.split(" - ").pop().trim();
   return s || String(nome || "").trim();
 };
@@ -46026,13 +46034,28 @@ window.abrirMapaKmz = async function(empId) {
     }
     const marcas = [];
     const pontosLote = [];
+    const centroDe = (pts) => {
+      if (pts.length === 1) return pts[0];
+      let lat = 0;
+      let lng = 0;
+      let n = 0;
+      pts.forEach((pt, i) => {
+        const prev = i ? pts[i - 1] : null;
+        if (prev && Math.abs(prev[0] - pt[0]) < 1e-7 && Math.abs(prev[1] - pt[1]) < 1e-7) return;
+        lat += pt[0];
+        lng += pt[1];
+        n += 1;
+      });
+      return n ? [lat / n, lng / n] : pts[0];
+    };
     (data.placemarks || []).forEach((p) => {
       const bruto = p && (p.coords || p.coordinates);
       const pts = (window.parseKmzCoordPoints ? window.parseKmzCoordPoints(bruto) : [])
         .map((pt) => [pt.lat, pt.lng])
         .filter((pt) => Number.isFinite(pt[0]) && Number.isFinite(pt[1]));
-      if (pts.length !== 1) return;
-      pontosLote.push(pts[0]);
+      if (!pts.length) return;
+      const centro = centroDe(pts);
+      pontosLote.push(centro);
       const nomeLote = String((p && (p.name || p.lot_name)) || "").trim();
       const etiqueta = window.kmzEtiquetaCurta(nomeLote, id) || nomeLote || "Lote";
       const escNome = String(etiqueta).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
@@ -46042,7 +46065,7 @@ window.abrirMapaKmz = async function(empId) {
         iconSize: [110, 18],
         iconAnchor: [5, 9]
       });
-      const mark = L.marker(pts[0], { icon: icon, interactive: true, keyboard: false, zIndexOffset: 400 }).addTo(map);
+      const mark = L.marker(centro, { icon: icon, interactive: true, keyboard: false, zIndexOffset: 400 }).addTo(map);
       mark.bindTooltip('<div class="kmz-tip"><strong>' + escNome + '</strong><p>Lendo o contrato…</p></div>', { direction: "top", opacity: 1, className: "kmz-lote-tip", offset: [8, -8] });
       mark.on("click", () => {
         const info = mark._kmzInfo;
@@ -46099,13 +46122,20 @@ window.abrirMapaKmz = async function(empId) {
     (data.quadras || []).forEach((q) => guardar(q && (q.coords || q.coordinates)));
     const enquadrar = () => {
       const foco = window.kmzPontosEnquadramento(pontosLote);
-      if (foco.length) map.fitBounds(foco, { padding: [48, 48], maxZoom: 19 });
-      else if (limites.length) map.fitBounds(limites, { padding: [28, 28], maxZoom: 18 });
+      if (foco.length === 1) {
+        map.setView(foco[0], 18);
+        return;
+      }
+      if (foco.length) {
+        map.fitBounds(foco, { padding: [40, 40], maxZoom: 19 });
+        return;
+      }
+      if (limites.length) map.fitBounds(limites, { padding: [28, 28], maxZoom: 18 });
       else map.setView([-14.2, -51.9], 4);
     };
     enquadrar();
     setTimeout(() => { map.invalidateSize(); enquadrar(); }, 220);
-    setTimeout(() => { map.invalidateSize(); enquadrar(); }, 520);
+    setTimeout(() => { map.invalidateSize(); enquadrar(); }, 700);
   }, 60);
 };
 

@@ -1524,22 +1524,55 @@ button.btn-fechar:hover,
   height: 100vh;
   max-height: 100vh;
   margin: 0;
+  padding: 0;
+  border: none;
   border-radius: 0;
   display: flex;
   flex-direction: column;
   overflow: hidden;
   transform: none;
 }
-#map-modal-overlay.is-kmz-cheio > .modal-box > div {
+#map-modal-overlay.is-kmz-cheio > .modal-box > .modal-header {
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+  margin: 0;
+  padding: 10px 16px;
+}
+#map-modal-overlay.is-kmz-cheio > .modal-box > .modal-header h3 {
+  margin: 0;
+}
+#map-modal-overlay.is-kmz-cheio > .modal-box > .map-modal-corpo {
   flex: 1 1 auto;
   min-height: 0;
   display: flex;
   flex-direction: column;
+  padding: 8px 12px 10px !important;
+}
+#map-modal-overlay.is-kmz-cheio .map-modal-aviso {
+  flex: 0 0 auto;
+  margin-bottom: 8px !important;
+  padding: 6px 10px !important;
 }
 #map-modal-overlay.is-kmz-cheio #map-iframe-container {
   flex: 1 1 auto;
   height: auto !important;
   min-height: 0;
+  margin-bottom: 8px !important;
+}
+#map-modal-overlay.is-kmz-cheio #leaflet-map-div,
+#map-modal-overlay.is-kmz-cheio .leaflet-container {
+  width: 100% !important;
+  height: 100% !important;
+}
+#map-modal-overlay.is-kmz-cheio #map-modal-ge-pro-container {
+  flex: 0 0 auto;
+  padding: 8px 12px !important;
+}
+#map-modal-overlay.is-kmz-cheio #map-modal-ge-pro-container p {
+  display: none;
 }
 
 .modal-header {
