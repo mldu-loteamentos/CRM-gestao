@@ -297,6 +297,9 @@ const OrcamentoForecastApp = {
 
   fatiasV1(linha) {
     const total = (linha.m || this.z()).slice(0, 12);
+    if (String(linha.conta || "").replace(/\D/g, "") === "1020106") {
+      return { cart: total.map((v) => this.num(v)), vend: this.z(), ant: this.z(), serv: this.z() };
+    }
     const mapa = window.ORCAMENTO_ORIGEM_2027 || {};
     const o = mapa[linha.e + "|" + linha.cc + "|" + linha.conta] || {};
     const vend = Array.isArray(o.vm) ? o.vm.map((v) => this.num(v)) : this.z();
@@ -728,7 +731,7 @@ const OrcamentoForecastApp = {
     if (this.ehReceitaPartida(linha.conta, linha.nome)) {
       const f = this.fatiasDe(this.state.versao, linha);
       const delta = atual[i] - antes;
-      const servico = String(linha.conta).indexOf("1.02") === 0;
+      const servico = String(linha.conta).replace(/\D/g, "") !== "1020106" && String(linha.conta).indexOf("1.02") === 0;
       if (servico) f.serv[i] = this.num(f.serv[i]) + delta;
       else f.cart[i] = this.num(f.cart[i]) + delta;
       doc.fatias[key] = f;

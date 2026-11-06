@@ -11934,7 +11934,8 @@ tr.pr-liberado td { background: #f7faf8; }
 .orc-imp-tri th:first-child, .orc-imp-tri td:first-child { text-align: left; width: auto; min-width: 0; position: static; font-weight: 700; }
 .orc-imp-quando { color: #105436; font-weight: 800; text-align: left; }
 .orc-red-cel { cursor: help; text-decoration: underline dotted; text-underline-offset: 3px; }
-.orc-ded-tip { position: fixed; z-index: 80; background: #fff; border: 1px solid #cbd5e1; border-radius: 8px; box-shadow: 0 12px 28px rgba(15, 23, 42, .2); padding: 8px 10px; pointer-events: none; max-width: 460px; }
+.orc-ded-tip { position: fixed; z-index: 13000; display: block; background: #fff; border: 1px solid #cbd5e1; border-radius: 8px; box-shadow: 0 12px 28px rgba(15, 23, 42, .2); padding: 8px 10px; pointer-events: none; max-width: 460px; }
+.orc-ded-tip[hidden] { display: none !important; }
 .orc-ded-tip strong { display: block; color: #105436; font-size: 0.72rem; margin-bottom: 4px; }
 .orc-ded-tip table { border-collapse: collapse; font-size: 0.72rem; width: 100%; }
 .orc-ded-tip td { padding: 2px 6px; color: #0f172a; white-space: nowrap; }

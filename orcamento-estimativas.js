@@ -211,10 +211,12 @@ const OrcEst = {
       if (!gid) gid = this.grupo(code, l.cn) || "";
       if (!tag) tag = this.tag(cfg, code);
     });
-    const nome = this.norm(l.cn);
+    const nome = this.norm((l.cn || "") + " " + (l.nome || ""));
     const fora = /LUCRO RECEB|DIVIDEND|APORTE/.test(nome);
+    const digitos = String(l.conta || "").replace(/\D/g, "");
     let bucket = "";
-    if (String(l.e || "") === "3" && String(l.conta || "").replace(/\D/g, "") === "1020102") bucket = "vendas";
+    if (digitos === "1020106" || nome.indexOf("TAXA DE CESSAO") >= 0) bucket = "vendas";
+    else if (String(l.e || "") === "3" && digitos === "1020102") bucket = "vendas";
     else if (tag === "Base para Vendas de Lote" || /DESCONTO DE JUROS CONTRAT/.test(nome) || String(l.conta || "").replace(/\D/g, "") === "2050103") bucket = "vendas";
     else if (tag === "Base para Receita de Serviços") bucket = "servicos";
     else if (tag === "Base para Aplicações Financeiras") bucket = "financeiras";
@@ -733,19 +735,31 @@ const OrcamentoImpostosApp = {
           </tr></tfoot>
         </table>
       </div>
-      <p class="orc-est-nota">Janeiro de 2027 usa o forecast de 2026. Receita de centro de custo de parceiro, e de centro com o imposto desmarcado, fica de fora. Na SPE 36, o imposto incide sobre a receita inteira: a parte do parceiro entra na base. A taxa de cessão entra na venda de lotes quando o plano marca essa conta nessa base. Na empresa 3, a administração de carteira de recebíveis entra na venda de lotes. A coluna Vendas é a receita integral. As redutoras ficam à parte e entram abatidas na base do imposto. Passe o mouse na redutora para ver as deduções, e no PIS, no COFINS, no IRPJ e na CSLL para ver a conta.</p>`;
+      <p class="orc-est-nota">Janeiro de 2027 usa o forecast de 2026. Receita de centro de custo de parceiro, e de centro com o imposto desmarcado, fica de fora. Na SPE 36, o imposto incide sobre a receita inteira: a parte do parceiro entra na base. A taxa de cessão entra como carteira, na mesma presunção da venda de lotes. Na empresa 3, a administração de carteira de recebíveis entra na venda de lotes. A coluna Vendas é a receita integral. As redutoras ficam à parte e entram abatidas na base do imposto. Passe o mouse na redutora para ver as deduções, e no PIS, no COFINS, no IRPJ e na CSLL para ver a conta.</p>`;
     const tab = body.querySelector(".orc-imp-tab");
     if (tab) tab.addEventListener("click", (ev) => {
       const el = ev.target.closest("[data-est-id]");
       if (!el || !tab.contains(el) || el.closest(".orc-imp-det-row")) return;
       this.toggle(el.getAttribute("data-est-id"));
     });
-    if (!this._dedLigado) {
-      this._dedLigado = true;
-      body.addEventListener("mouseover", (ev) => this.mostrarDed(ev));
-      body.addEventListener("mouseout", (ev) => this.esconderDed(ev));
-    }
+    this.ligarDed();
     if (window.lucide && lucide.createIcons) lucide.createIcons();
+  },
+
+  ligarDed() {
+    if (this._dedDoc) return;
+    this._dedDoc = true;
+    document.addEventListener("mouseover", (ev) => {
+      const alvo = ev.target && ev.target.closest ? ev.target.closest("[data-ded]") : null;
+      const body = document.getElementById("orc-imp-body");
+      if (!alvo || !body || !body.contains(alvo)) return;
+      this.mostrarDed(ev);
+    }, true);
+    document.addEventListener("mouseout", (ev) => {
+      const alvo = ev.target && ev.target.closest ? ev.target.closest("[data-ded]") : null;
+      if (!alvo) return;
+      this.esconderDed(ev);
+    }, true);
   },
 
   mostrarDed(ev) {
@@ -757,13 +771,16 @@ const OrcamentoImpostosApp = {
     const esc = (t) => OrcEst.esc(t);
     tip.innerHTML = `<strong>Deduções</strong><table>${linhas.map((l) => `<tr><td>${esc(l.onde)}</td><td>${esc(l.conta)}</td><td>${esc(l.valor)}</td></tr>`).join("")}</table>`;
     tip.hidden = false;
+    tip.style.display = "block";
+    tip.style.zIndex = "13000";
     const r = td.getBoundingClientRect();
-    const w = tip.offsetWidth;
-    const h = tip.offsetHeight;
-    let left = Math.min(r.left, window.innerWidth - w - 8);
-    if (left < 8) left = 8;
-    let top = r.bottom + 6;
-    if (top + h > window.innerHeight - 8) top = Math.max(8, r.top - h - 6);
+    const w = tip.offsetWidth || 280;
+    const h = tip.offsetHeight || 80;
+    let left = r.left - w - 8;
+    if (left < 8) left = Math.min(r.right + 8, window.innerWidth - w - 8);
+    if (left + w > window.innerWidth - 8) left = Math.max(8, window.innerWidth - w - 8);
+    let top = r.top;
+    if (top + h > window.innerHeight - 8) top = Math.max(8, window.innerHeight - h - 8);
     tip.style.left = left + "px";
     tip.style.top = top + "px";
   },
@@ -970,6 +987,49 @@ const OrcamentoImpostosApp = {
     return n < 0 ? "-" + texto : texto;
   },
 
+  deducoesDaEmpresa(empresa) {
+    const cfg = OrcEst.taxConfig();
+    const vazio = () => ({
+      redV: Array.from({ length: 12 }, () => []),
+      redS: Array.from({ length: 12 }, () => []),
+      redF: Array.from({ length: 12 }, () => [])
+    });
+    const pack = vazio();
+    const por = { redV: Array.from({ length: 12 }, () => new Map()), redS: Array.from({ length: 12 }, () => new Map()), redF: Array.from({ length: 12 }, () => new Map()) };
+    const anotar = (bucket, i, l, s) => {
+      const chave = bucket === "servicos" ? "redS" : (bucket === "financeiras" ? "redF" : "redV");
+      const mapa = por[chave][i];
+      const k = String(l.conta || "") + "|" + String(l.cc || "");
+      const item = mapa.get(k) || {
+        conta: String(l.conta || ""),
+        nome: String(l.cn || l.nome || "").replace(/\s+/g, " ").trim(),
+        cc: String(l.cc || ""),
+        cn: String(l.en || "").replace(/\s+/g, " ").trim(),
+        v: 0
+      };
+      item.v += s;
+      mapa.set(k, item);
+    };
+    OrcEst.linhas().forEach((l) => {
+      if (String(l.e || "") !== String(empresa)) return;
+      if (!OrcEst.entraNoImposto(l.cc, l.en, l.e)) return;
+      if (OrcEst.tipoApurado(l)) return;
+      const cl = OrcEst.classe(l, cfg);
+      if (!cl || !cl.red) return;
+      const gid = OrcEst.grupo(l.conta, l.cn);
+      (l.m || []).forEach((v, i) => {
+        if (i > 11) return;
+        let s = OrcEst.sinal(gid, l.conta, l.cn, v);
+        if (s > 0) s = -Math.abs(s);
+        if (s) anotar(cl.bucket, i, l, s);
+      });
+    });
+    ["redV", "redS", "redF"].forEach((chave) => {
+      pack[chave] = por[chave].map((mapa) => [...mapa.values()].filter((x) => Math.abs(x.v) >= 0.5));
+    });
+    return pack;
+  },
+
   detalhe(row) {
     const mo = (v) => OrcEst.money(v);
     const tem = (arr) => (arr || []).some((v) => Math.abs(Number(v) || 0) >= 0.5);
@@ -977,12 +1037,22 @@ const OrcamentoImpostosApp = {
     const pagoEm = ["Fev", "Mar", "Abr", "Mai", "Jun", "Jul", "Ago", "Set", "Out", "Nov", "Dez", "Jan/28"];
     const ali = OrcEst.aliquotas();
     const dez = this.baseForecastMes(row, "2026-12");
+    const pack = this.deducoesDaEmpresa(row.id);
+    const mesesDe = (chave) => {
+      const guardado = row.deds && row.deds[chave];
+      if (guardado && guardado.some((arr) => arr && arr.length)) return guardado;
+      return pack[chave];
+    };
+    const dezDe = (chave) => {
+      const guardado = dez && dez.deds && dez.deds[chave];
+      return guardado && guardado.length ? guardado : null;
+    };
     const cols = [{ nome: "Vendas", arr: row.vendas.map((v, i) => this.vendaIntegral(v, row.redV[i])), dez: dez ? this.vendaIntegral(dez.vendas, dez.redV) : null, dica: "Receita integral, antes das redutoras." }];
-    if (tem(row.redV) || (dez && Math.abs(Number(dez.redV) || 0) >= 0.5)) cols.push({ nome: "Redutoras", arr: row.redV, dez: dez ? dez.redV : null, deds: row.deds && row.deds.redV, dedDez: dez && dez.deds && dez.deds.redV, dica: "Distratos e as outras contas redutoras. Ficam fora da coluna Vendas e entram abatidas na base do imposto." });
+    if (tem(row.redV) || (dez && Math.abs(Number(dez.redV) || 0) >= 0.5)) cols.push({ nome: "Redutoras", arr: row.redV, dez: dez ? dez.redV : null, deds: mesesDe("redV"), dedDez: dezDe("redV"), dica: "Distratos e as outras contas redutoras. Ficam fora da coluna Vendas e entram abatidas na base do imposto." });
     cols.push({ nome: "Serviços", arr: row.servicos, dez: dez && dez.servicos });
-    if (tem(row.redS) || (dez && Math.abs(Number(dez.redS) || 0) >= 0.5)) cols.push({ nome: "Red. serviços", arr: row.redS, dez: dez ? dez.redS : null, deds: row.deds && row.deds.redS, dedDez: dez && dez.deds && dez.deds.redS });
+    if (tem(row.redS) || (dez && Math.abs(Number(dez.redS) || 0) >= 0.5)) cols.push({ nome: "Red. serviços", arr: row.redS, dez: dez ? dez.redS : null, deds: mesesDe("redS"), dedDez: dezDe("redS") });
     if (tem(row.financeiras) || tem(row.redF)) cols.push({ nome: "Aplicações", arr: row.financeiras, dez: dez && dez.financeiras });
-    if (tem(row.redF) || (dez && Math.abs(Number(dez.redF) || 0) >= 0.5)) cols.push({ nome: "Red. aplicações", arr: row.redF, dez: dez ? dez.redF : null, deds: row.deds && row.deds.redF, dedDez: dez && dez.deds && dez.deds.redF });
+    if (tem(row.redF) || (dez && Math.abs(Number(dez.redF) || 0) >= 0.5)) cols.push({ nome: "Red. aplicações", arr: row.redF, dez: dez ? dez.redF : null, deds: mesesDe("redF"), dedDez: dezDe("redF") });
     const head = `<th>Competência</th>${cols.map((c) => `<th${c.dica ? ` title="${OrcEst.esc(c.dica)}"` : ""}>${c.nome}</th>`).join("")}<th>PIS</th><th>COFINS</th><th>Pago em</th>`;
     const celTxt = (valor, linhas) => {
       const dica = linhas && linhas.length ? ` title="${linhas.map((l) => OrcEst.esc(l)).join("&#10;")}" style="cursor:help"` : "";
@@ -1000,7 +1070,8 @@ const OrcamentoImpostosApp = {
       if (!this._dicas) this._dicas = {};
       const id = "d" + (++this._dicaN);
       this._dicas[id] = linhas;
-      return `<td class="orc-red-cel" data-ded="${id}">${mo(valor)}</td>`;
+      const titulo = linhas.map((l) => [l.onde, l.conta, l.valor].filter(Boolean).join(" · ")).join("\n");
+      return `<td class="orc-red-cel" data-ded="${id}" title="${OrcEst.esc(titulo)}">${mo(valor)}</td>`;
     };
     const celBase = (c, i) => {
       const itens = i == null ? c.dedDez : (c.deds && c.deds[i]);

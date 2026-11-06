@@ -309,7 +309,8 @@ const OrcamentoApp = {
         .orc-tools { display: flex; gap: 12px; align-items: flex-end; justify-content: space-between; flex-wrap: wrap; margin-bottom: 12px; }
         .orc-tools-filters, .orc-tools-actions { display: flex; gap: 8px; align-items: flex-end; flex-wrap: wrap; }
         #orcamento-root .ml-emp-filter { flex: 0 0 420px; width: 420px; max-width: none; min-width: 280px; }
-        #orcamento-root #orc-plan-box .ml-emp-filter { flex: 0 0 340px; width: 340px; min-width: 240px; }
+        #orcamento-root #orc-plan-box { flex: 0 0 360px; width: 360px; max-width: 360px; min-width: 240px; }
+        #orcamento-root #orc-plan-box .ml-emp-filter { width: 100%; max-width: 100%; min-width: 0; flex: none; }
         #orcamento-root .btn-excel { height: 40px; }
         .orc-ghost { height: 40px; border-radius: 8px; border: 1px solid #105436; background: #fff; color: #105436; font-weight: 800; padding: 0 12px; cursor: pointer; display: inline-flex; align-items: center; gap: 6px; font-size: 0.82rem; }
         .orc-ghost:hover { background: #d1fae5; }
@@ -405,7 +406,8 @@ const OrcamentoApp = {
         .orc-empty { padding: 28px; text-align: center; color: #64748b; }
         .orc-sienge { color: #1e3a8a; cursor: help; font-variant-numeric: tabular-nums; }
         .orc-emp .orc-sienge, .orc-total .orc-sienge { color: #dbeafe; }
-        .orc-cart-tip { position: fixed; z-index: 80; background: #fff; color: #0f172a; border: 1px solid #cbd5e1; border-radius: 8px; padding: 8px 10px 6px; pointer-events: none; box-shadow: 0 12px 28px rgba(15, 23, 42, 0.2); }
+        .orc-kpi[data-plano] { cursor: help; }
+        .orc-cart-tip { position: fixed; z-index: 13000; background: #fff; color: #0f172a; border: 1px solid #cbd5e1; border-radius: 8px; padding: 8px 10px 6px; pointer-events: none; box-shadow: 0 12px 28px rgba(15, 23, 42, 0.2); }
         .orc-cart-tip table { border-collapse: collapse; font-size: 0.72rem; }
         .orc-cart-tip th { text-align: right; font-weight: 700; color: #fff; background: #105436; padding: 4px 8px; }
         .orc-cart-tip th:first-child { text-align: left; border-radius: 4px 0 0 0; }
@@ -553,9 +555,9 @@ const OrcamentoApp = {
     const map = new Map();
     const add = (line) => {
       const id = String((line && line.conta) || "");
-      if (!id || map.has(id)) return;
-      const nome = String((line && line.nome) || "").trim() || this.accountName(id);
-      map.set(id, nome);
+      if (!id) return;
+      const nome = this.accountName(id) || String((line && line.nome) || "").trim();
+      if (!map.has(id) || (!map.get(id) && nome)) map.set(id, nome);
     };
     (this.data().lines || []).forEach(add);
     (this.received().lines || []).forEach(add);
@@ -582,13 +584,14 @@ const OrcamentoApp = {
     if (!box || !window.MlEmpresaFilter) return;
     box.innerHTML = MlEmpresaFilter.html({
       id: "orc-plan",
-      label: "Planos",
+      label: "Plano financeiro",
       items: this.planItems(),
       selectedIds: this.selectedPlanIds.map(String),
       open: this.planDropOpen,
       query: this.planQuery,
       emptyMeansAll: true,
-      nouns: { singular: "plano", plural: "planos" }
+      extraClass: "ml-emp-filter--corte",
+      nouns: { singular: "plano", plural: "planos", none: "Nenhum plano", noMatch: "Nenhum plano com esse nome." }
     });
     MlEmpresaFilter.bind("orc-plan", {
       toggleOpen: () => {
@@ -707,7 +710,7 @@ const OrcamentoApp = {
         this.paint();
       });
       body.addEventListener("mouseover", (ev) => {
-        const cell = ev.target.closest("td[data-sienge], td[data-vend]");
+        const cell = ev.target.closest("td[data-plano], td[data-sienge], td[data-vend]");
         if (!cell || cell === this._cartCell) return;
         this._cartCell = cell;
         this.placeCartTip(cell);
@@ -716,9 +719,25 @@ const OrcamentoApp = {
         (row && row.companyIds || []).forEach((id) => this.flightCarteira(id));
       });
       body.addEventListener("mouseout", (ev) => {
-        const cell = ev.target.closest("td[data-sienge], td[data-vend]");
+        const cell = ev.target.closest("td[data-plano], td[data-sienge], td[data-vend]");
         if (!cell) return;
-        const next = ev.relatedTarget && ev.relatedTarget.closest && ev.relatedTarget.closest("td[data-sienge], td[data-vend]");
+        const next = ev.relatedTarget && ev.relatedTarget.closest && ev.relatedTarget.closest("td[data-plano], td[data-sienge], td[data-vend]");
+        if (next === cell) return;
+        this.hideCartTip();
+      });
+    }
+    const kpis = document.getElementById("orc-kpis");
+    if (kpis) {
+      kpis.addEventListener("mouseover", (ev) => {
+        const cell = ev.target.closest("[data-plano]");
+        if (!cell || cell === this._cartCell) return;
+        this._cartCell = cell;
+        this.placeCartTip(cell);
+      });
+      kpis.addEventListener("mouseout", (ev) => {
+        const cell = ev.target.closest("[data-plano]");
+        if (!cell) return;
+        const next = ev.relatedTarget && ev.relatedTarget.closest && ev.relatedTarget.closest("[data-plano]");
         if (next === cell) return;
         this.hideCartTip();
       });
@@ -911,6 +930,72 @@ const OrcamentoApp = {
       + '<div class="orc-cart-note">' + (this.forecastIndex() >= 10 ? "nov–dez" : "out–dez") + ' de 2026 são forecast. Carteira 2027 é o orçado marcado como carteira na observação. Sienge é a carteira em aberto, sem sub judice.</div>';
   },
 
+  planosTipHtml(row, spec) {
+    const planos = row.planos || [];
+    const valorDe = (p) => {
+      if (spec === "cart") return Number(p.cart) || 0;
+      if (spec === "vend") return Number(p.vend) || 0;
+      if (spec === "serv") return Number(p.serv) || 0;
+      if (spec === "ant") return Number(p.ant) || 0;
+      if (spec === "lucro") return Number(p.lucro) || 0;
+      if (spec === "aporte") return Number(p.aporte) || 0;
+      if (spec === "t26") return this.sum(p.m26);
+      if (spec === "t27") return this.sum(p.m27);
+      const faixa = String(spec || "").match(/^(m26|m27):(.+)$/);
+      if (!faixa) return 0;
+      const arr = p[faixa[1]] || [];
+      return faixa[2].split(",").reduce((s, i) => s + (Number(arr[Number(i)]) || 0), 0);
+    };
+    const titulos = {
+      cart: "Carteira", vend: "Novas vendas", serv: "Serviços", ant: "Antecipação",
+      lucro: "Lucros recebidos", aporte: "Aportes", t26: "2026", t27: "2027"
+    };
+    const titulo = titulos[spec] || "Receita";
+    const linhas = planos.map((p) => ({
+      nome: [p.conta, p.nome].filter(Boolean).join(" "),
+      v: valorDe(p)
+    })).filter((x) => Math.abs(x.v) >= 0.5).sort((a, b) => Math.abs(b.v) - Math.abs(a.v));
+    if (!linhas.length) return "";
+    const corpo = linhas.map((l) => "<tr><td>" + this.esc(l.nome) + "</td><td>" + this.money(l.v) + "</td></tr>").join("");
+    const total = linhas.reduce((s, l) => s + l.v, 0);
+    return "<strong style=\"display:block;margin:0 2px 4px;color:#105436;font-size:0.72rem;\">" + this.esc(titulo) + "</strong><table><thead><tr><th>Plano financeiro</th><th>Valor</th></tr></thead><tbody>"
+      + corpo
+      + '<tr class="orc-cart-total"><td>Total</td><td>' + this.money(total) + "</td></tr></tbody></table>";
+  },
+
+  acumularPlano(map, acc, factor) {
+    const id = String((acc && acc.conta) || "");
+    if (!id) return;
+    const f = Number(factor);
+    const mult = Number.isFinite(f) ? f : 1;
+    let item = map.get(id);
+    if (!item) {
+      item = {
+        conta: id,
+        nome: String(acc.nome || acc.cn || this.accountName(id) || "").replace(/\s+/g, " ").trim(),
+        cart: 0, vend: 0, serv: 0, ant: 0, lucro: 0, aporte: 0,
+        m26: this.blank(), m27: this.blank()
+      };
+      map.set(id, item);
+    } else if (!item.nome) {
+      item.nome = String(acc.nome || acc.cn || this.accountName(id) || "").replace(/\s+/g, " ").trim();
+    }
+    item.cart += (Number(acc.cart) || 0) * mult;
+    item.vend += (Number(acc.vend) || 0) * mult;
+    item.serv += (Number(acc.serv) || 0) * mult;
+    item.ant += (Number(acc.ant) || 0) * mult;
+    item.lucro += (Number(acc.lucro) || 0) * mult;
+    item.aporte += (Number(acc.aporte) || 0) * mult;
+    (acc.m26 || []).forEach((v, i) => { if (i < 12) item.m26[i] += (Number(v) || 0) * mult; });
+    (acc.m27 || []).forEach((v, i) => { if (i < 12) item.m27[i] += (Number(v) || 0) * mult; });
+  },
+
+  planosDe(accounts, factor) {
+    const map = new Map();
+    (accounts || []).forEach((acc) => this.acumularPlano(map, acc, factor));
+    return [...map.values()];
+  },
+
   vendTipHtml(row) {
     const vm = row.vm || this.blank();
     const lines = this.months().map((name, i) => "<tr><td>" + this.esc(String(name).toLowerCase()) + "</td><td>" + this.money(vm[i]) + "</td></tr>").join("");
@@ -923,6 +1008,27 @@ const OrcamentoApp = {
   placeCartTip(cell) {
     const tip = document.getElementById("orc-cart-tip");
     if (!tip || !cell || !cell.isConnected) return;
+    const plano = cell.getAttribute("data-plano");
+    const prow = cell.getAttribute("data-prow") || (cell.closest("tr") && cell.closest("tr").getAttribute("data-prow"));
+    if (plano) {
+      const row = this._rows && this._rows[Number(prow)];
+      const html = row ? this.planosTipHtml(row, plano) : "";
+      if (!html) { tip.hidden = true; return; }
+      tip.innerHTML = html;
+      tip.hidden = false;
+      tip.style.zIndex = "13000";
+      const rect = cell.getBoundingClientRect();
+      const width = tip.offsetWidth || 280;
+      const height = tip.offsetHeight || 120;
+      let left = rect.left - width - 8;
+      if (left < 8) left = Math.min(rect.right + 8, window.innerWidth - width - 8);
+      if (left + width > window.innerWidth - 8) left = Math.max(8, window.innerWidth - width - 8);
+      let top = rect.top;
+      if (top + height > window.innerHeight - 8) top = Math.max(8, window.innerHeight - height - 8);
+      tip.style.left = left + "px";
+      tip.style.top = top + "px";
+      return;
+    }
     const vendIdx = cell.getAttribute("data-vend");
     const row = this._rows && this._rows[Number(vendIdx != null ? vendIdx : cell.getAttribute("data-sienge"))];
     if (!row) return;
@@ -992,9 +1098,35 @@ const OrcamentoApp = {
     return sign + p.toLocaleString("pt-BR", { minimumFractionDigits: 1, maximumFractionDigits: 1 }) + "%";
   },
 
+  contaCessao(conta, nome) {
+    if (String(conta || "").replace(/\D/g, "") === "1020106") return true;
+    const n = String(nome || this.accountName(conta) || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toUpperCase();
+    return n.indexOf("TAXA DE CESSAO") >= 0;
+  },
+
   isServicoConta(conta, empresa) {
+    if (this.contaCessao(conta)) return false;
     if (String(empresa || "") === "3" && String(conta || "").replace(/\D/g, "") === "1020102") return false;
     return String(conta || "").indexOf("1.02") === 0;
+  },
+
+  aplicarCessao(row) {
+    if (!this.contaCessao(row.conta, row.nome || this.accountName(row.conta))) return;
+    const sm = Array.isArray(row.sm) ? row.sm : null;
+    const temMes = sm && sm.some((v) => Math.abs(Number(v) || 0) >= 0.5);
+    if (Math.abs(Number(row.serv) || 0) >= 0.5 || temMes) {
+      const add = temMes ? sm : (row.m27 || this.blank());
+      row.cm = (row.cm && row.cm.length ? row.cm : this.blank()).map((v, i) => (Number(v) || 0) + (Number(add[i]) || 0));
+      row.cart = (Number(row.cart) || 0) + this.sum(add);
+      row.serv = 0;
+      row.sm = this.blank();
+    }
+    if (Math.abs(Number(row.cart) || 0) < 0.5 && Math.abs(this.sum(row.m27)) >= 0.5) {
+      row.cart = this.sum(row.m27);
+      row.cm = (row.m27 || this.blank()).slice();
+    }
+    row.notas = [row.cart ? "Carteira" : "", row.vend ? "Vendas" : "", row.ant ? "Antecipação" : "", row.lucro ? "Lucros recebidos" : "", row.aporte ? "Aporte recebido" : ""].filter(Boolean).join(" · ");
+    row._origem = true;
   },
 
   origemDe(line) {
@@ -1082,6 +1214,7 @@ const OrcamentoApp = {
       row.serv = this.sum(row.m27);
       row.sm = row.m27.slice();
     });
+    map.forEach((row) => this.aplicarCessao(row));
     (this.received().lines || []).forEach((line) => {
       const row = touch(line);
       if (row) this.addMonths(row.m26, line.m, line.conta);
@@ -1277,6 +1410,7 @@ const OrcamentoApp = {
   collect() {
     const companies = this.companiesTree();
     const rows = [];
+    const todosPlanos = new Map();
     const y26 = this.blank();
     const y27 = this.blank();
     const yVm = this.blank();
@@ -1332,8 +1466,13 @@ const OrcamentoApp = {
       yLucro += seLucro;
       yAporte += seAporte;
       const shareNote = this.mouraView ? (" · " + this.participation(emp.e).toLocaleString("pt-BR") + "% ML") : "";
+      const contasEmp = [];
+      emp.costCenters.forEach((cc) => cc.accounts.forEach((acc) => contasEmp.push(acc)));
+      const planosEmp = this.planosDe(contasEmp, factor);
+      planosEmp.forEach((p) => this.acumularPlano(todosPlanos, p, 1));
       rows.push({
         kind: "emp",
+        planos: planosEmp,
         level: "Empresa",
         key: emp.key,
         depth: 0,
@@ -1357,8 +1496,10 @@ const OrcamentoApp = {
         parentCc: ""
       });
       const pushCenter = (cc, depth, parentObra) => {
+        const planosCc = this.planosDe([...cc.accounts.values()], factor);
         rows.push({
           kind: "cc",
+          planos: planosCc,
           level: "Centro de custo",
           key: cc.key,
           depth: depth,
@@ -1384,6 +1525,7 @@ const OrcamentoApp = {
         this.leafAccounts(cc).forEach((acc) => {
           rows.push({
             kind: "leaf",
+            planos: this.planosDe([acc], factor),
             level: "Conta",
             key: cc.key + "|" + acc.conta,
             depth: depth + 1,
@@ -1433,8 +1575,11 @@ const OrcamentoApp = {
           gLucro += this.sumScalar(cc.tree, "lucro");
           gAporte += this.sumScalar(cc.tree, "aporte");
         });
+        const contasObra = [];
+        item.centers.forEach((cc) => cc.accounts.forEach((acc) => contasObra.push(acc)));
         rows.push({
           kind: "obra",
+          planos: this.planosDe(contasObra, factor),
           level: "Obra",
           key: item.key,
           depth: 1,
@@ -1469,6 +1614,7 @@ const OrcamentoApp = {
       });
       rows.push({
         kind: "total",
+        planos: [...todosPlanos.values()],
         level: "Total",
         key: "",
         depth: 0,
@@ -1542,12 +1688,12 @@ const OrcamentoApp = {
           <div class="orc-kpi-year">2027</div>
           <div class="orc-kpis">
             <div class="orc-kpi"><span>ORÇADO</span><strong>${this.money(t27)}</strong></div>
-            <div class="orc-kpi orc-kpi-cart"><span>CARTEIRA</span><strong class="orc-cart-col">${this.money(data.yCart)}</strong></div>
-            <div class="orc-kpi orc-kpi-vend"><span>NOVAS VENDAS</span><strong class="orc-vend-col">${this.money(data.yVend)}</strong></div>
-            <div class="orc-kpi orc-kpi-serv"><span>SERVIÇOS</span><strong class="orc-serv-col">${this.money(data.yServ)}</strong></div>
-            <div class="orc-kpi"><span>ANTECIPAÇÃO</span><strong>${this.money(data.yAnt)}</strong></div>
-            <div class="orc-kpi"><span>LUCROS RECEBIDOS</span><strong>${this.money(data.yLucro)}</strong></div>
-            <div class="orc-kpi"><span>APORTES</span><strong>${this.money(data.yAporte)}</strong></div>
+            <div class="orc-kpi orc-kpi-cart" data-plano="cart" data-prow="${data.rows.findIndex((r) => r.kind === "total")}"><span>CARTEIRA</span><strong class="orc-cart-col">${this.money(data.yCart)}</strong></div>
+            <div class="orc-kpi orc-kpi-vend" data-plano="vend" data-prow="${data.rows.findIndex((r) => r.kind === "total")}"><span>NOVAS VENDAS</span><strong class="orc-vend-col">${this.money(data.yVend)}</strong></div>
+            <div class="orc-kpi orc-kpi-serv" data-plano="serv" data-prow="${data.rows.findIndex((r) => r.kind === "total")}"><span>SERVIÇOS</span><strong class="orc-serv-col">${this.money(data.yServ)}</strong></div>
+            <div class="orc-kpi" data-plano="ant" data-prow="${data.rows.findIndex((r) => r.kind === "total")}"><span>ANTECIPAÇÃO</span><strong>${this.money(data.yAnt)}</strong></div>
+            <div class="orc-kpi" data-plano="lucro" data-prow="${data.rows.findIndex((r) => r.kind === "total")}"><span>LUCROS RECEBIDOS</span><strong>${this.money(data.yLucro)}</strong></div>
+            <div class="orc-kpi" data-plano="aporte" data-prow="${data.rows.findIndex((r) => r.kind === "total")}"><span>APORTES</span><strong>${this.money(data.yAporte)}</strong></div>
             <div class="orc-kpi"><span>VARIAÇÃO</span><strong class="${delta < 0 ? "orc-neg" : ""}">${this.money(delta)} <span class="orc-pct">${this.pctLabel(delta, t26)}</span></strong></div>
           </div>
         </div>
@@ -1581,16 +1727,16 @@ const OrcamentoApp = {
     const vend = Number(row.vend) || 0;
     const serv = Number(row.serv) || 0;
     if (!cart && !vend && !serv && !row.notas) return '<td>—</td>';
-    if (field === "cart") return this.moneyCell(cart, "orc-cart-col");
-    if (field === "serv") return this.moneyCell(serv, "orc-serv-col");
-    if (!vend) return this.moneyCell(vend, "orc-vend-col");
-    const cls = ["orc-vend-col", "orc-vend-hover", vend < 0 ? "orc-neg" : ""].filter(Boolean).join(" ");
-    return '<td class="' + cls + '" data-vend="' + row._i + '">' + this.money(vend) + "</td>";
+    if (field === "cart") return this.moneyCell(cart, "orc-cart-col", "cart");
+    if (field === "serv") return this.moneyCell(serv, "orc-serv-col", "serv");
+    return this.moneyCell(vend, "orc-vend-col", "vend");
   },
 
-  moneyCell(value, extra) {
-    const cls = [value < 0 ? "orc-neg" : "", extra || ""].filter(Boolean).join(" ");
-    return '<td class="' + cls + '">' + this.money(value) + "</td>";
+  moneyCell(value, extra, plano) {
+    const hover = plano && Math.abs(Number(value) || 0) >= 0.5 ? "orc-vend-hover" : "";
+    const cls = [value < 0 ? "orc-neg" : "", extra || "", hover].filter(Boolean).join(" ");
+    const mark = plano ? ' data-plano="' + this.esc(plano) + '"' : "";
+    return '<td class="' + cls + '"' + mark + '>' + this.money(value) + "</td>";
   },
 
   pctCell(delta, base) {
@@ -1610,13 +1756,14 @@ const OrcamentoApp = {
     const cls = (row.kind === "emp" ? "orc-emp" : (row.kind === "total" ? "orc-total" : (row.kind === "obra" ? "orc-obra" : (row.kind === "cc" ? "orc-cc" : "orc-leaf"))))
       + (row.key && this.pickedRows.has(row.key) ? " orc-picked" : "");
     const cart = (row.cartCcs ? ' data-cart="' + row._i + '"' : "")
-      + (row.key ? ' data-orc-row="' + this.esc(row.key) + '"' : "");
-    const y26 = this.periodCols(2026).map((col) => this.moneyCell(this.sumIndexes(row.m26, col.indexes), col.forecast ? "orc-fc" : "")).join("");
-    const y27 = this.periodCols(2027).map((col, i) => this.moneyCell(this.sumIndexes(row.m27, col.indexes), "orc-y27" + (i === 0 ? " orc-split" : ""))).join("");
+      + (row.key ? ' data-orc-row="' + this.esc(row.key) + '"' : "")
+      + ' data-prow="' + row._i + '"';
+    const y26 = this.periodCols(2026).map((col) => this.moneyCell(this.sumIndexes(row.m26, col.indexes), col.forecast ? "orc-fc" : "", "m26:" + col.indexes.join(","))).join("");
+    const y27 = this.periodCols(2027).map((col, i) => this.moneyCell(this.sumIndexes(row.m27, col.indexes), "orc-y27" + (i === 0 ? " orc-split" : ""), "m27:" + col.indexes.join(","))).join("");
     return '<tr class="' + cls + '"' + cart + '><td style="padding-left:' + pad + 'px;">' + chevron + "<span>" + this.esc(row.label) + "</span>" + this.origemHtml(row) + "</td>"
       + y26 + y27
-      + this.moneyCell(t26, "orc-split")
-      + this.moneyCell(t27, "orc-y27")
+      + this.moneyCell(t26, "orc-split", "t26")
+      + this.moneyCell(t27, "orc-y27", "t27")
       + this.origemCell(row, "cart")
       + this.origemCell(row, "vend")
       + this.origemCell(row, "serv")
