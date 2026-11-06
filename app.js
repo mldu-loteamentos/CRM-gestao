@@ -14424,7 +14424,8 @@ async function viewCustomerCard(customerId, saleId, specificTitulo = null) {
       if (fichaConjugeBtn) fichaConjugeBtn.style.display = '';
       if (fichaComplementoBtn) fichaComplementoBtn.style.display = '';
       if (fichaProcuradoresBtn) fichaProcuradoresBtn.style.display = '';
-      if (fichaAnexosBtn) fichaAnexosBtn.style.display = isSubjudice ? 'none' : '';
+      // Anexos só fica oculto para ADVOGADO COBRANÇA (ramo acima); sub judice continua mostrando.
+      if (fichaAnexosBtn) fichaAnexosBtn.style.display = '';
       if (fichaScoreBtn) fichaScoreBtn.style.display = isSubjudice ? 'none' : '';
   }
 
@@ -15128,26 +15129,39 @@ function formatCpfCnpj(val) {
   const detAnexosEl = document.getElementById("det-anexos-content");
   if (detAnexosEl) {
     detAnexosEl.innerHTML = `
-      <div style="text-align: center; padding: 20px;">
-        <div class="loading-spinner" style="width: 20px; height: 20px; border: 2px solid rgba(16,84,54,0.15); border-top-color: var(--color-primary); border-radius: 50%; animation: spin 0.8s linear infinite; margin: 0 auto 10px;"></div>
-        <span style="font-size: 0.9rem; color: var(--color-text-muted);">Buscando anexos...</span>
+      <div class="ml-load">
+        <div class="loading-spinner"></div>
+        <div class="loading-status-text">Carregando anexos…</div>
+        <div class="ml-load-track"><div class="loading-progress-bar anexos-ficha-bar"></div></div>
       </div>
     `;
-    const anexosTopo = (titulo) => `
-      <div class="ficha-anexos-topo">
-        <span class="ficha-anexos-titulo">${titulo}</span>
-        <button type="button" class="btn btn-primary ficha-anexos-buscar" onclick="window.abrirAnexosParaJuridico(${customerId})">
-          <i data-lucide="paperclip" style="width: 14px; height: 14px;"></i> Buscar mais anexos
-        </button>
-      </div>
-    `;
-    const assistenteBtnHtml = anexosTopo("Anexos");
+    const escHtml = (s) => String(s == null ? "" : s)
+      .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+    const tabelaAnexos = (corpo, qtd) => `
+      <div class="ficha-anexos">
+        <div class="ficha-anexos-lista">
+          <table class="cc-table">
+            <colgroup><col><col style="width:210px"></colgroup>
+            <thead><tr>
+              <th>Documento${qtd ? ` <span class="ficha-anexos-qtd">${qtd}</span>` : ""}</th>
+              <th class="ficha-anexos-acao">
+                <button type="button" class="ficha-anexos-buscar" onclick="window.abrirAnexosParaJuridico(${customerId})">
+                  <i data-lucide="upload" style="width:14px;height:14px;"></i> Enviar para Jurídico
+                </button>
+              </th>
+            </tr></thead>
+            <tbody>${corpo}</tbody>
+          </table>
+        </div>
+      </div>`;
 
     (async function loadFichaAnexos() {
       let rows = [];
       try {
         const custAtt = await SiengeApiService.getCustomerAttachments(customerId);
-        rows = rows.concat((custAtt && custAtt.results) || []);
+        rows = rows.concat(((custAtt && custAtt.results) || []).map((a) => ({
+          ...a, isCustomerAttachment: true, customerId: customerId
+        })));
       } catch (e) {}
       try {
         // Os dados do contrato em AppState só valem depois que ESTA ficha os gravou (senão sobram da ficha anterior).
@@ -15169,93 +15183,116 @@ function formatCpfCnpj(val) {
         }
         if (contract && contract.id && SiengeApiService.getSalesContractAttachments) {
           const cAtt = await SiengeApiService.getSalesContractAttachments(contract.id);
-          rows = rows.concat((cAtt && cAtt.results) || []);
+          rows = rows.concat(((cAtt && cAtt.results) || []).map((a) => ({
+            ...a, _sourceContractId: contract.id
+          })));
+        }
+        let unitId = "";
+        const unit = (contract && ((contract.salesContractUnits || contract.units || [])[0])) || {};
+        unitId = unit.id || unit.unitId || (contract && contract.unitId) || "";
+        const nomeUnidade = String(
+          unit.name || unit.unitName
+          || (document.getElementById("det-block-lot") && document.getElementById("det-block-lot").textContent)
+          || ""
+        ).trim();
+        const cc = (contract && contract.enterpriseId) || ctx.currentCostCenterId || "";
+        if (!unitId && nomeUnidade && cc && SiengeApiService.findUnitByName) {
+          const achada = await SiengeApiService.findUnitByName(cc, nomeUnidade);
+          if (achada && achada.id) unitId = achada.id;
+        }
+        if (!unitId && contract && typeof window.anexosFindSiengeUnitId === "function") {
+          try { unitId = await window.anexosFindSiengeUnitId(contract, cc, nomeUnidade); } catch (e) {}
+        }
+        if (unitId && SiengeApiService.getUnitAttachments) {
+          const uAtt = await SiengeApiService.getUnitAttachments(unitId);
+          rows = rows.concat(((uAtt && uAtt.results) || []).map((a) => ({
+            ...a, isUnitAttachment: true, unitId: unitId
+          })));
         }
       } catch (e) {
         console.warn('[Ficha] anexos do contrato', e);
       }
-      const attRes = { results: rows };
-       if (attRes && attRes.results && attRes.results.length > 0) {
-         window.downloadSiengeDocument = async function(url, filename, event) {
-           try {
-             const btn = event.currentTarget;
-             const oldHtml = btn.innerHTML;
-             btn.innerHTML = `<div class="loading-spinner" style="width:14px; height:14px; border:2px solid rgba(16,84,54,0.15); border-top-color:var(--color-primary); border-radius:50%; animation:spin 0.8s linear infinite;"></div>`;
-             
-             // Ensure url starts with proxy if it's absolute sienge API
-             let fetchUrl = url;
-             if (fetchUrl.includes('api.sienge.com.br')) {
-                const parts = fetchUrl.split('public/api/v1');
-                if (parts.length > 1) fetchUrl = SIENGE_CONFIG.baseUrl + parts[1];
-             }
-
-             const response = await fetch(fetchUrl, {
-               method: "GET",
-               headers: { "Authorization": getBasicAuthHeader() }
-             });
-
-             if (!response.ok) throw new Error(`Status ${response.status}`);
-             const blob = await response.blob();
-             const blobUrl = window.URL.createObjectURL(blob);
-             const a = document.createElement('a');
-             a.href = blobUrl;
-             a.download = filename;
-             document.body.appendChild(a);
-             a.click();
-             document.body.removeChild(a);
-             window.URL.revokeObjectURL(blobUrl);
-             btn.innerHTML = oldHtml;
-           } catch(e) {
-             console.error('Erro no download', e);
-             alert('Não foi possível baixar o documento. Verifique as credenciais da API.');
-             if(event && event.currentTarget) {
-               event.currentTarget.innerHTML = `<i data-lucide="paperclip" style="width:15px;height:15px;"></i>`;
-               if (window.lucide) lucide.createIcons();
-             }
-           }
-         };
-
-         const escHtml = (s) => String(s == null ? "" : s)
-           .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
-         let attRows = attRes.results.map((att) => {
-           let dlLink = "#";
-           if (att.links && att.links.length > 0) {
-             const lnkObj = att.links.find((l) => l.rel === "contentDownloadLink");
-             if (lnkObj) dlLink = lnkObj.href;
-           }
-           const nome = String(att.fileName || att.name || "Arquivo");
-           return `
-             <tr>
-               <td class="cc-nome" title="${escHtml(nome)}">${escHtml(nome)}</td>
-               <td class="is-center" style="overflow:visible;">
-                 <button type="button" class="tvig-ico" title="Anexo" data-url="${escHtml(dlLink)}" data-name="${escHtml(nome)}" onclick="downloadSiengeDocument(this.getAttribute('data-url'), this.getAttribute('data-name'), event)">
-                   <i data-lucide="paperclip" style="width:15px;height:15px;"></i>
-                 </button>
-               </td>
-             </tr>
-           `;
-         }).join("");
-         const qtdAnexos = attRes.results.length;
-         detAnexosEl.innerHTML = `<div class="ficha-anexos">
-           ${anexosTopo(qtdAnexos === 1 ? "1 anexo" : qtdAnexos + " anexos")}
-           <div class="cc-scroll ficha-anexos-lista">
-             <table class="cc-table">
-               <colgroup><col><col style="width:64px"></colgroup>
-               <thead><tr>
-                 <th>Documento</th>
-                 <th class="is-center">Ações</th>
-               </tr></thead>
-               <tbody>${attRows}</tbody>
-             </table>
-           </div>
-         </div>`;
-         lucide.createIcons();
-       } else {
-         detAnexosEl.innerHTML = assistenteBtnHtml + `<span style="color: var(--color-text-muted); font-size: 0.9rem;">Foi encontrado apenas o cadastro do cliente, porém sem anexos.</span>`;
-         lucide.createIcons();
-       }
-    })().catch(err => {
-         detAnexosEl.innerHTML = assistenteBtnHtml + `<span style="color: var(--color-danger); font-size: 0.9rem;">Erro ao carregar anexos da API Sienge.</span>`;
+      const vistos = new Set();
+      rows = rows.filter((a) => {
+        const nome = String(a.fileName || a.name || "").trim().toLowerCase();
+        const id = String(a.attachmentId || a.attachmentid || a.id || "");
+        const chaveNome = nome ? "n:" + nome : "";
+        const chaveId = id ? (a.isUnitAttachment ? "u:" : a.isCustomerAttachment ? "c:" : "k:") + id : "";
+        if ((chaveNome && vistos.has(chaveNome)) || (chaveId && vistos.has(chaveId))) return false;
+        if (chaveNome) vistos.add(chaveNome);
+        if (chaveId) vistos.add(chaveId);
+        return true;
+      });
+      window.downloadSiengeDocument = async function(url, filename, event) {
+        try {
+          const btn = event.currentTarget;
+          const oldHtml = btn.innerHTML;
+          btn.innerHTML = `<div class="loading-spinner" style="width:14px; height:14px; border:2px solid rgba(16,84,54,0.15); border-top-color:var(--color-primary); border-radius:50%; animation:spin 0.8s linear infinite;"></div>`;
+          let fetchUrl = url;
+          if (fetchUrl.includes('api.sienge.com.br')) {
+            const parts = fetchUrl.split('public/api/v1');
+            if (parts.length > 1) fetchUrl = SIENGE_CONFIG.baseUrl + parts[1];
+          }
+          const response = await fetch(fetchUrl, {
+            method: "GET",
+            headers: { "Authorization": getBasicAuthHeader() }
+          });
+          if (!response.ok) throw new Error(`Status ${response.status}`);
+          const blob = await response.blob();
+          const blobUrl = window.URL.createObjectURL(blob);
+          const a = document.createElement('a');
+          a.href = blobUrl;
+          a.download = filename;
+          document.body.appendChild(a);
+          a.click();
+          document.body.removeChild(a);
+          window.URL.revokeObjectURL(blobUrl);
+          btn.innerHTML = oldHtml;
+        } catch (e) {
+          console.error('Erro no download', e);
+          alert('Não foi possível baixar o documento. Verifique as credenciais da API.');
+          if (event && event.currentTarget) {
+            event.currentTarget.innerHTML = `<i data-lucide="paperclip" style="width:15px;height:15px;"></i>`;
+            if (window.lucide) lucide.createIcons();
+          }
+        }
+      };
+      const linkAnexo = (att) => {
+        const links = att.links || [];
+        const lnk = links.find((l) => l.rel === "contentDownloadLink") || links.find((l) => l.rel === "self");
+        if (lnk && lnk.href) return lnk.href;
+        const id = att.attachmentId || att.attachmentid || att.id;
+        if (!id || typeof SIENGE_CONFIG === "undefined") return "#";
+        let base = String(SIENGE_CONFIG.baseUrl || "");
+        if (base.endsWith("/v1")) base = base.slice(0, -3);
+        if (att.isUnitAttachment && att.unitId) return base + "/units/" + encodeURIComponent(att.unitId) + "/attachments/" + encodeURIComponent(id) + "/file";
+        if (att.isCustomerAttachment && att.customerId) return base + "/customers/" + encodeURIComponent(att.customerId) + "/attachments/" + encodeURIComponent(id) + "/file";
+        if (att._sourceContractId) return base + "/sales-contracts/" + encodeURIComponent(att._sourceContractId) + "/attachments/" + encodeURIComponent(id) + "/file";
+        return "#";
+      };
+      const attRows = rows.map((att) => {
+        const nome = String(att.fileName || att.name || att.description || "Arquivo");
+        const dlLink = linkAnexo(att);
+        return `
+          <tr>
+            <td class="cc-nome" title="${escHtml(nome)}">${escHtml(nome)}</td>
+            <td class="is-center" style="overflow:visible;">
+              <button type="button" class="tvig-ico" title="Anexo" data-url="${escHtml(dlLink)}" data-name="${escHtml(nome)}" onclick="downloadSiengeDocument(this.getAttribute('data-url'), this.getAttribute('data-name'), event)">
+                <i data-lucide="paperclip" style="width:15px;height:15px;"></i>
+              </button>
+            </td>
+          </tr>`;
+      }).join("");
+      const vazio = `<tr><td colspan="2" class="cc-nome" style="color:#64748b;">Nenhum anexo do cliente ou da unidade.</td></tr>`;
+      const qtd = rows.length === 1 ? "1 anexo" : rows.length + " anexos";
+      detAnexosEl.innerHTML = tabelaAnexos(attRows || vazio, rows.length ? qtd : "");
+      if (window.lucide) lucide.createIcons();
+    })().catch(() => {
+      detAnexosEl.innerHTML = tabelaAnexos(
+        `<tr><td colspan="2" class="cc-nome" style="color:var(--color-danger);">Erro ao carregar anexos da API Sienge.</td></tr>`,
+        ""
+      );
+      if (window.lucide) lucide.createIcons();
     });
   }
 
@@ -51198,37 +51235,18 @@ window.openAnexosClienteModal = async function(customerId) {
       if (typeof AnexosDB !== 'undefined') localFiles = await AnexosDB.load(customerId);
     } catch (e) {}
 
-    const [attPack, custPack] = await Promise.all([
-      SiengeApiService.getSalesContractAttachments(mainC.id),
-      SiengeApiService.getCustomerAttachments(customerId)
-    ]);
-    let allAttachments = ((attPack && attPack.results) || []).map((a) => ({
-      ...a, _sourceContractId: mainC.id
-    }));
-    const custRows = (custPack && custPack.results) || [];
-    if (custRows.length) {
-      allAttachments = allAttachments.concat(custRows.map((a) => ({
-        ...a, isCustomerAttachment: true, customerId: customerId
-      })));
-    }
-
-    AnexosState.contractAttachments = typeof anexosDedupeAttachments === 'function'
-      ? anexosDedupeAttachments(allAttachments)
-      : allAttachments;
     AnexosState.loadingUnidadeAnexos = false;
-                renderAnexosModule();
-                
-                if (localFiles && localFiles.length > 0) {
+    renderAnexosModule();
+
+    if (localFiles && localFiles.length > 0) {
       localFiles.forEach((f) => {
-                        if (f.file && ['jpg', 'jpeg', 'png', 'pdf'].includes(f.ext)) {
+        if (f.file && ['jpg', 'jpeg', 'png', 'pdf'].includes(f.ext)) {
           try { f.previewUrl = URL.createObjectURL(f.file); } catch (e) {}
-                        }
-                    });
-                    AnexosState.files = localFiles;
-                    AnexosState.importedContracts.add(mainC.id);
-                    if (AnexosApp.renderFilesList) AnexosApp.renderFilesList();
-    } else if (AnexosState.contractAttachments.length > 0 && AnexosApp.importarAnexosDoContrato) {
-      AnexosApp.importarAnexosDoContrato({ auto: true, force: true });
+        }
+      });
+      AnexosState.files = localFiles;
+      AnexosState.importedContracts.add(mainC.id);
+      if (AnexosApp.renderFilesList) AnexosApp.renderFilesList();
     }
   } catch (err) {
             console.error("Erro ao carregar detalhes do contrato e anexos no modal:", err);

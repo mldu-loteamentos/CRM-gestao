@@ -3170,6 +3170,17 @@ const SiengeApiService = {
     }
   },
 
+  async getUnitAttachments(unitId) {
+    if (s_apiMode === "simulado" || !unitId) return { results: [] };
+    try {
+      const res = await siengeFetchWithRetry(`/units/${encodeURIComponent(unitId)}/attachments?limit=200&offset=0`);
+      return { results: this._siengeAttachmentRows(res) };
+    } catch (e) {
+      console.error("[Sienge] anexos da unidade", e);
+      return { results: [] };
+    }
+  },
+
   async findSalesContract(opts) {
     const o = opts || {};
     const customerId = o.customerId != null ? String(o.customerId).trim() : "";

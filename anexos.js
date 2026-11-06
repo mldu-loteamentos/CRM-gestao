@@ -1309,6 +1309,7 @@ function anexosCreateIcons(scopeEl) {
 
 /** Atualiza só o estado de loading / botão Baixar — sem reconstruir o módulo. */
 function anexosPatchLoadingUi() {
+  if (window.anexosTargetId === 'anexos-cliente-root') return;
   const loading = !!AnexosState.loadingUnidadeAnexos;
   const cardBody = document.querySelector('.anexos-upload-card .card-body');
   let banner = document.querySelector('.anexos-unidade-loading');
@@ -1635,30 +1636,22 @@ function renderAnexosModule(opts) {
         </div>` : ''}
       </div>
       `}
-      ${isModal ? `
-      <div class="anexos-contract-info" id="anexos-contract-info" style="margin-bottom:16px;padding:14px 16px;border:1px solid var(--color-border);border-radius:10px;display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;background:#fff;">
-        <div style="min-width:0;">
-          <div style="font-size:0.75rem;font-weight:700;letter-spacing:.04em;text-transform:uppercase;color:var(--color-text-muted);margin-bottom:4px;">Contrato no Sienge</div>
-          <div style="font-weight:700;color:var(--color-primary);">${anexosEsc((AnexosState.activeContract && (AnexosState.activeContract.contractNumber || AnexosState.activeContract.id)) || (AnexosState.loadingUnidadeAnexos ? 'Localizando…' : 'Não localizado'))}</div>
-          ${AnexosState.activeContract && AnexosState.activeContract.receivableBillId ? `<div style="font-size:0.85rem;color:var(--color-text-muted);margin-top:2px;">Título ${anexosEsc(AnexosState.activeContract.receivableBillId)}</div>` : ''}
-        </div>
-        <div class="anexos-contract-side" id="anexos-contract-actions">
-          ${AnexosState.loadingUnidadeAnexos
-            ? `<span style="color:var(--color-primary);font-size:0.9rem;font-weight:600;">Buscando anexos…</span>`
-            : (AnexosState.activeContract
-              ? (AnexosState.contractAttachments.length > 0
-                ? (AnexosState.importedContracts.has(AnexosState.activeContract.id) && AnexosState.files.length
-                  ? `<span class="anexos-imported-badge"><i data-lucide="check-circle" style="width:16px;"></i> ${AnexosState.files.length} na lista · <button type="button" class="btn btn-outline anexos-ctrl" style="padding:2px 8px;font-size:0.75rem;margin-left:6px;" onclick="AnexosApp.importarAnexosDoContrato({ force: true, skipOcr: true })">Baixar de novo</button></span>`
-                  : `<button type="button" class="btn btn-outline anexos-ctrl" style="padding:0 14px;font-weight:600;border-color:var(--color-primary);color:var(--color-primary);display:inline-flex;align-items:center;gap:6px;" onclick="AnexosApp.importarAnexosDoContrato({ force: true, skipOcr: true })"><i data-lucide="download" style="width:16px;"></i> Baixar ${AnexosState.contractAttachments.length} Anexos</button>`)
-                : `<span style="color:var(--color-text-muted);font-size:0.9rem;">Nenhum anexo no contrato</span>`)
-              : `<span style="color:var(--color-text-muted);font-size:0.9rem;">Contrato não localizado</span>`)}
-        </div>
+      ${isModal && AnexosState.loadingUnidadeAnexos ? `
+      <div class="ml-load anexos-juridico-load">
+        <div class="loading-spinner"></div>
+        <div class="loading-status-text">Preparando o envio…</div>
+        <div class="ml-load-track"><div class="loading-progress-bar"></div></div>
+      </div>` : ''}
+      ${isModal && !AnexosState.loadingUnidadeAnexos && AnexosState.activeContract ? `
+      <div class="anexos-contract-info" id="anexos-contract-info" style="margin-bottom:16px;font-size:0.9rem;color:#64748b;">
+        Contrato <strong style="color:var(--color-primary);">${anexosEsc(AnexosState.activeContract.contractNumber || AnexosState.activeContract.id)}</strong>
+        ${AnexosState.activeContract.receivableBillId ? ` · Título ${anexosEsc(AnexosState.activeContract.receivableBillId)}` : ''}
       </div>` : ''}
         
       <!-- ETAPA 3: Upload e Revisão -->
       <div class="card anexos-upload-card" style="margin-bottom: 20px; transition: opacity 0.3s ease;">
         <div class="card-body">
-          ${AnexosState.loadingUnidadeAnexos ? `
+          ${AnexosState.loadingUnidadeAnexos && !isModal ? `
           <div class="anexos-unidade-loading" style="margin:0 0 14px;padding:12px 14px;border:1px solid #bbf7d0;background:#ecfdf5;border-radius:8px;color:#065f46;font-weight:600;font-size:0.9rem;display:flex;align-items:center;gap:8px;">
             <i data-lucide="loader-circle" style="width:18px;height:18px;"></i>
             Carregando anexos da unidade…

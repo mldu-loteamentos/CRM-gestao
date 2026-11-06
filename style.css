@@ -12248,12 +12248,21 @@ textarea.cem-campo { height: auto; min-height: 180px; padding: 8px; line-height:
 .apa-marca { font-weight: 800; color: #105436; margin-bottom: 8px; }
 
 
-/* Ficha do cliente: aba Anexos (título e botão na mesma linha, lista com rolagem própria) */
-.ficha-anexos-topo { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-bottom: 8px; }
-.ficha-anexos-titulo { font-size: 0.85rem; font-weight: 700; color: #105436; }
-.ficha-anexos-buscar { display: inline-flex; align-items: center; gap: 6px; height: 30px; padding: 0 12px; font-size: 0.8rem; font-weight: 600; white-space: nowrap; }
-.ficha-anexos-lista { max-height: 240px; }
+/* Ficha do cliente: aba Anexos. A planilha acompanha a rolagem da página. */
+.ficha-anexos-lista { max-height: none; overflow: visible; border: 1px solid #e2e8f0; border-radius: 8px; background: #fff; }
 .ficha-anexos .cc-table { font-size: 0.78rem; }
 .ficha-anexos .cc-table td { padding: 3px 8px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .ficha-anexos .cc-table thead th { padding: 5px 8px; }
+.ficha-anexos .cc-table thead th.ficha-anexos-acao { width: 210px; text-align: right; }
+.ficha-anexos-qtd { font-weight: 600; opacity: 0.85; }
+.ficha-anexos-buscar {
+  display: inline-flex; align-items: center; gap: 6px; height: 28px; padding: 0 12px;
+  font-size: 0.78rem; font-weight: 700; white-space: nowrap; color: #105436; background: #fff;
+  border: none; border-radius: 6px; cursor: pointer;
+}
+.ficha-anexos-buscar:hover { background: #ecfdf5; }
 .ficha-anexos .cc-table .tvig-ico { width: 26px; height: 26px; }
+.anexos-juridico-load { padding: 16px 8px 8px; }
+.anexos-juridico-load .loading-progress-bar,
+.anexos-ficha-bar { width: 8%; animation: anexos-jur-carga 8s ease-out forwards; }
+@keyframes anexos-jur-carga { from { width: 8%; } to { width: 92%; } }
