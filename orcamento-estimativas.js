@@ -36,9 +36,28 @@ const OrcEst = {
     };
   },
 
+  /** Orçamento 2027 para impostos e repasses: sempre a V2 quando existir, seja qual for a versão aberta no DFC 2027.
+   *  Sem V2, usa a base do DFC (V1). */
+  pacote() {
+    const app = typeof OrcamentoDfcApp !== "undefined" ? OrcamentoDfcApp : null;
+    if (!app) return null;
+    try { if (typeof app.garantir === "function") app.garantir(); } catch (e) {}
+    const v2 = app._v2;
+    if (v2 && Array.isArray(v2.lines) && v2.lines.length) return v2;
+    return typeof app.origem === "function" ? app.origem() : null;
+  },
+
   linhas() {
+    const p = this.pacote();
+    if (p && Array.isArray(p.lines)) return p.lines;
     const app = typeof OrcamentoDfcApp !== "undefined" ? OrcamentoDfcApp : null;
     return app && typeof app.lines === "function" ? app.lines() : [];
+  },
+
+  /** Muda quando outra versão do orçamento passa a valer (para refazer contas guardadas). */
+  marcaLinhas() {
+    const p = this.pacote();
+    return (p ? String(p.versao || "") + ":" + String(p.savedAt || 0) + ":" : "") + this.linhas().length;
   },
 
   empresas() {
@@ -551,7 +570,7 @@ const OrcamentoImpostosApp = {
 
   lista() {
     const ids = this.selectedCompanyIds.map(String).join(",");
-    const stamp = OrcEst.linhas().length + "|" + ids + "|" + (this._fcToken || 0);
+    const stamp = OrcEst.marcaLinhas() + "|" + ids + "|" + (this._fcToken || 0);
     if (this._stamp === stamp && this._rows) return this._rows;
     const mapa = this.calcular(this.escopo());
     const rows = Object.values(mapa)

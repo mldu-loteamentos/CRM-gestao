@@ -123,8 +123,17 @@ const OrcamentoDfcApp = {
   },
 
   /* V2 na tela: a variação de 2027 compara com a V1. V1 sozinha continua contra 2026. */
+  /** "2" = V2; "12" = V1 x V2 (V1 no lugar de 2026, V2 ao lado). */
+  usaV2() {
+    return (this.versao === "2" || this.versao === "12") && !!(this._v2 && Array.isArray(this._v2.lines) && this._v2.lines.length);
+  },
+
+  modoV1xV2() {
+    return this.versao === "12" && this.comparando();
+  },
+
   comparando() {
-    return this.versao === "2"
+    return (this.versao === "2" || this.versao === "12")
       && this._v1 && Array.isArray(this._v1.lines) && this._v1.lines.length
       && this._v2 && Array.isArray(this._v2.lines) && this._v2.lines.length;
   },
@@ -149,7 +158,7 @@ const OrcamentoDfcApp = {
 
   origem() {
     this.garantir();
-    if (this.versao === "2" && this._v2 && Array.isArray(this._v2.lines) && this._v2.lines.length) return this._v2;
+    if (this.usaV2()) return this._v2;
     if (this._v1 && Array.isArray(this._v1.lines) && this._v1.lines.length) return this._v1;
     return window.ORCAMENTO_DFC_2027 || { fileName: "", lines: [] };
   },
@@ -2581,6 +2590,7 @@ const OrcamentoDfcApp = {
   },
 
   htmlSaldos() {
+    if (this.modoV1xV2()) return "";
     const span = 1 + this.MESES.length + 1 + (this.MESES.length + 1) * (1 + this.colsVar());
     if (this._saldoEstado === "lendo") {
       const n = Number(this._saldoFeitos) || 0;
@@ -2628,6 +2638,7 @@ const OrcamentoDfcApp = {
   },
 
   quadroSaldos() {
+    if (this.modoV1xV2()) return "";
     const corte = this._corte == null ? this.corteForecast() : this._corte;
     if (this._saldoEstado !== "ok" || corte <= 0) return "";
     const mes = this.mesSaldo();
@@ -2708,14 +2719,16 @@ const OrcamentoDfcApp = {
 
   textoLead() {
     const comum = "O saldo final de 2026 é o saldo inicial de janeiro de 2027, e cada mês seguinte parte do saldo final do anterior. " + this.textoCorte() + " O realizado vem do caixa e banco.";
+    if (this.modoV1xV2()) return "V1 x V2: à esquerda a V1 de 2027 (base anterior), à direita a V2 (arquivo novo). Ligue Variação R$ ou % para ver, mês a mês, quanto a V2 muda em relação à V1. O saldo de caixa fica na V1 e na V2 separadas.";
     if (this.comparando()) return "A V1 é a base de 2027 que já estava carregada. A V2 é o arquivo novo. A variação de cada mês de 2027 compara a V2 com a V1. " + comum;
     if (this._v2 && this.versao === "1") return "Você está na V1, a base anterior de 2027. A variação de cada mês de 2027 compara com o mesmo mês de 2026. " + comum;
     return "Janeiro a dezembro de 2026, o total, e depois janeiro a dezembro de 2027. A variação ao lado de cada mês de 2027 compara com o mesmo mês de 2026. " + comum;
   },
 
   setVersao(id) {
-    if (id === "2" && !(this._v2 && Array.isArray(this._v2.lines) && this._v2.lines.length)) return;
-    this.versao = id === "2" ? "2" : "1";
+    const temV2 = !!(this._v2 && Array.isArray(this._v2.lines) && this._v2.lines.length);
+    if ((id === "2" || id === "12") && !temV2) return;
+    this.versao = id === "12" ? "12" : (id === "2" ? "2" : "1");
     this._versaoEscolhida = true;
     this.selectedCcIds = [];
     this.selectedPlanIds = [];
@@ -2743,7 +2756,8 @@ const OrcamentoDfcApp = {
       const on = this.versao === id;
       return `<button type="button" role="tab" class="ml-tab${on ? " is-active" : ""}" data-dfc-versao="${id}" aria-selected="${on ? "true" : "false"}">${label}</button>`;
     };
-    box.innerHTML = `<div class="ml-tabs" role="tablist">${btn("1", "V1")}${btn("2", "V2")}</div>`;
+    const temV1 = !!(this._v1 && Array.isArray(this._v1.lines) && this._v1.lines.length);
+    box.innerHTML = `<div class="ml-tabs" role="tablist">${btn("1", "V1")}${btn("2", "V2")}${temV1 ? btn("12", "V1 x V2") : ""}</div>`;
     box.querySelectorAll("[data-dfc-versao]").forEach((el) => {
       el.addEventListener("click", () => this.setVersao(el.getAttribute("data-dfc-versao")));
     });
@@ -2755,12 +2769,12 @@ const OrcamentoDfcApp = {
     const pack = src || this.origem();
     const n = (pack.lines || []).length;
     const nome = pack.fileName || "Base 2027";
-    const marca = this.versao === "2" && this._v2 ? "V2" : "V1";
+    const marca = this.modoV1xV2() ? "V1 x V2 · V2" : (this.usaV2() ? "V2" : "V1");
     const estado = this.erro
       ? " · " + this.erro
       : (this._nuvemOk ? " · salvo no Firebase" : (this._nuvemMsg ? " · " + this._nuvemMsg : ""));
     const outra = this._v2 && this._v1
-      ? (" · " + (this.versao === "2" ? "V1 " + (this._v1.fileName || "base") : "V2 " + (this._v2.fileName || "arquivo")))
+      ? (" · " + (this.usaV2() ? "V1 " + (this._v1.fileName || "base") : "V2 " + (this._v2.fileName || "arquivo")))
       : "";
     el.textContent = n ? (marca + " · " + nome + " · " + n.toLocaleString("pt-BR") + " lançamentos" + outra + estado) : ("Nenhum orçamento carregado." + estado);
   },
@@ -3098,10 +3112,11 @@ const OrcamentoDfcApp = {
     this._linhasDfc = rows;
     const corte = this._corte == null ? this.corteForecast() : this._corte;
     const extras = (this.varRs ? `<th class="orc-dfc-vcol">Var R$</th>` : "") + (this.varPct ? `<th class="orc-dfc-vcol">Var %</th>` : "");
-    const h26 = this.MESES.map((m, i) => `<th${i === 0 ? " class=\"orc-dfc-sep\"" : ""} title="${i >= corte ? "Previsão de 2026" : "Realizado de 2026"}">${m}</th>`).join("") + `<th class="orc-dfc-sep">Total</th>`;
+    const v1xv2 = this.modoV1xV2();
+    const h26 = this.MESES.map((m, i) => `<th${i === 0 ? " class=\"orc-dfc-sep\"" : ""} title="${v1xv2 ? "2027 · V1" : (i >= corte ? "Previsão de 2026" : "Realizado de 2026")}">${m}</th>`).join("") + `<th class="orc-dfc-sep">Total</th>`;
     const h27 = this.MESES.map((m, i) => `<th${i === 0 ? " class=\"orc-dfc-sep\"" : ""}>${m}</th>${extras}`).join("") + `<th class="orc-dfc-sep">Total</th>${extras}`;
-    const rotulo27 = this.versao === "2" && this._v2 ? "2027 · V2" : (this._v2 ? "2027 · V1" : "2027");
-    const h1 = `<th colspan="13" class="orc-dfc-mes">2026</th><th colspan="${13 * (1 + this.colsVar())}" class="orc-dfc-mes is-alt">${rotulo27}</th>`;
+    const rotulo27 = this.usaV2() ? "2027 · V2" : (this._v2 ? "2027 · V1" : "2027");
+    const h1 = `<th colspan="13" class="orc-dfc-mes">${v1xv2 ? "2027 · V1" : "2026"}</th><th colspan="${13 * (1 + this.colsVar())}" class="orc-dfc-mes is-alt">${rotulo27}</th>`;
     const h2 = h26 + h27;
     const trs = rows.map((r) => {
       const cls = [
@@ -3118,28 +3133,28 @@ const OrcamentoDfcApp = {
       const ico = r.hasKids
         ? `<i data-lucide="${(this.visao === "2" ? this.expanded2 : this.expanded).has(r.id) ? "chevron-down" : "chevron-right"}"></i>`
         : `<i class="orc-dfc-no"></i>`;
-      const base = r.base || [];
+      const base = (v1xv2 ? r.cmp : r.base) || [];
       const c26 = (r.months || []).map((v, i) => {
         const real = Number(base[i]) || 0;
-        const chave = i < corte ? (r.id + "||" + i) : "";
+        const chave = !v1xv2 && i < corte ? (r.id + "||" + i) : "";
         const abre = chave ? " orc-dfc-abre" : "";
         const marca = chave ? ` data-orc-2026="${this.esc(chave)}"` : "";
         const neg = real < -0.005 ? " orc-dfc-neg" : "";
         const sep = i === 0 ? " orc-dfc-sep" : "";
-        const titulo = (i >= corte ? "Previsão " : "Realizado ") + this.money(real);
+        const titulo = (v1xv2 ? "V1 " : (i >= corte ? "Previsão " : "Realizado ")) + this.money(real);
         return `<td class="${(sep + neg + abre).trim()}"${marca} title="${this.esc(titulo + (chave ? " · Ver lançamentos" : ""))}">${this.money(real)}</td>`;
       }).join("");
-      const baseTotal = Number(r.baseTotal) || 0;
+      const baseTotal = Number(v1xv2 ? r.cmpTotal : r.baseTotal) || 0;
       const ref = this.refLinha(r);
       const modoVar = this.comparando() ? "v1" : "";
-      const chaveTot = corte > 0 ? (r.id + "||t") : "";
-      const tot26 = `<td class="orc-dfc-sep${baseTotal < -0.005 ? " orc-dfc-neg" : ""}${chaveTot ? " orc-dfc-abre" : ""}"${chaveTot ? ` data-orc-2026="${this.esc(chaveTot)}"` : ""} title="Total de 2026">${this.money(baseTotal)}</td>`;
+      const chaveTot = !v1xv2 && corte > 0 ? (r.id + "||t") : "";
+      const tot26 = `<td class="orc-dfc-sep${baseTotal < -0.005 ? " orc-dfc-neg" : ""}${chaveTot ? " orc-dfc-abre" : ""}"${chaveTot ? ` data-orc-2026="${this.esc(chaveTot)}"` : ""} title="${v1xv2 ? "Total da V1" : "Total de 2026"}">${this.money(baseTotal)}</td>`;
       const tot27 = (r.months || []).reduce((a, b) => a + (Number(b) || 0), 0);
       const c27 = (r.months || []).map((v, i) => {
         const n = Number(v) || 0;
         const sep = i === 0 ? " orc-dfc-sep" : "";
         return `<td class="${sep.trim()}${n < -0.005 ? " orc-dfc-neg" : ""}">${this.money(n)}</td>${this.htmlVars(n, ref.meses[i], modoVar)}`;
-      }).join("") + `<td class="orc-dfc-sep${tot27 < -0.005 ? " orc-dfc-neg" : ""}" title="Total de 2027">${this.money(tot27)}</td>${this.htmlVars(tot27, ref.total, modoVar)}`;
+      }).join("") + `<td class="orc-dfc-sep${tot27 < -0.005 ? " orc-dfc-neg" : ""}" title="${v1xv2 ? "Total da V2" : "Total de 2027"}">${this.money(tot27)}</td>${this.htmlVars(tot27, ref.total, modoVar)}`;
       const click = r.hasKids ? ` data-dfc-id="${this.esc(r.id)}"` : "";
       return `<tr class="${cls}"${click}>
         <td style="padding-left:${6 + r.level * 8}px">${ico}<span>${this.esc(r.name)}</span></td>
