@@ -462,7 +462,11 @@ const OrcamentoApp = {
         .orc-empty { padding: 28px; text-align: center; color: #64748b; }
         .orc-sienge { color: #1e3a8a; cursor: help; font-variant-numeric: tabular-nums; }
         .orc-emp .orc-sienge, .orc-total .orc-sienge { color: #dbeafe; }
-        .orc-kpi[data-plano] { cursor: help; }
+        .orc-kpi[data-plano] { cursor: pointer; transition: box-shadow 0.15s, transform 0.15s; }
+        .orc-kpi[data-plano]:hover { box-shadow: 0 4px 12px rgba(15, 23, 42, 0.14); }
+        .orc-kpi[data-plano].is-on { box-shadow: 0 0 0 3px #f97316, 0 4px 12px rgba(15, 23, 42, 0.14); }
+        .orc-kpi-filtro { margin: 10px 0 0; padding: 8px 12px; border-radius: 8px; background: #fff7ed; border: 1px solid #fdba74; color: #7c2d12; font-size: 0.82rem; }
+        .orc-kpi-filtro button { margin-left: 8px; border: 1px solid #ea580c; background: #fff; color: #c2410c; border-radius: 6px; padding: 2px 10px; font-weight: 700; cursor: pointer; }
         .orc-cart-tip { position: fixed; z-index: 13000; background: #fff; color: #0f172a; border: 1px solid #cbd5e1; border-radius: 8px; padding: 8px 10px 6px; pointer-events: none; box-shadow: 0 12px 28px rgba(15, 23, 42, 0.2); }
         .orc-cart-tip table { border-collapse: collapse; font-size: 0.72rem; }
         .orc-cart-tip th { text-align: right; font-weight: 700; color: #fff; background: #105436; padding: 4px 8px; }
@@ -784,6 +788,27 @@ const OrcamentoApp = {
     }
     const kpis = document.getElementById("orc-kpis");
     if (kpis) {
+      const escolher = (ev) => {
+        if (ev.target.closest("[data-kpi-limpar]")) {
+          this.kpiFiltro = "";
+          this.hideCartTip();
+          this.paint();
+          return;
+        }
+        const card = ev.target.closest(".orc-kpi[data-plano]");
+        if (!card) return;
+        const k = card.getAttribute("data-plano");
+        this.kpiFiltro = this.kpiFiltro === k ? "" : k;
+        this.hideCartTip();
+        this.paint();
+      };
+      kpis.addEventListener("click", escolher);
+      kpis.addEventListener("keydown", (ev) => {
+        if ((ev.key === "Enter" || ev.key === " ") && ev.target.closest(".orc-kpi[data-plano]")) {
+          ev.preventDefault();
+          escolher(ev);
+        }
+      });
       kpis.addEventListener("mouseover", (ev) => {
         const cell = ev.target.closest("[data-plano]");
         if (!cell || cell === this._cartCell) return;
@@ -1224,6 +1249,7 @@ const OrcamentoApp = {
           serv: 0,
           sm: this.blank(),
           ant: 0,
+          am: this.blank(),
           lucro: 0,
           aporte: 0,
           notas: ""
@@ -1260,6 +1286,8 @@ const OrcamentoApp = {
         if (sm) row.sm = sm;
       }
       if (o.ant) row.ant = this.signed(line.conta, o.ant);
+      const am = meses(o.am);
+      if (am) row.am = am;
       if (o.lucro) row.lucro = this.signed(line.conta, o.lucro);
       if (o.aporte) row.aporte = this.signed(line.conta, o.aporte);
       row.notas = [o.cart ? "Carteira" : "", o.vend ? "Vendas" : "", o.ant ? "Antecipação" : "", o.serv ? "Serviço" : "", o.lucro ? "Lucros recebidos" : "", o.aporte ? "Aporte recebido" : ""].filter(Boolean).join(" · ");
@@ -1271,6 +1299,15 @@ const OrcamentoApp = {
       row.sm = row.m27.slice();
     });
     map.forEach((row) => this.aplicarCessao(row));
+    // Lucros recebidos e aportes ocupam a linha inteira: o valor é o orçado da V2 (o RECEITAS.xlsx só classifica).
+    map.forEach((row) => {
+      ["lucro", "aporte"].forEach((k) => {
+        if (!(Math.abs(Number(row[k]) || 0) >= 0.005)) return;
+        const outras = ["cart", "vend", "serv", "ant", "lucro", "aporte"]
+          .filter((x) => x !== k && Math.abs(Number(row[x]) || 0) >= 0.005);
+        if (!outras.length) row[k] = this.sum(row.m27);
+      });
+    });
     (this.received().lines || []).forEach((line) => {
       const row = touch(line);
       if (row) this.addMonths(row.m26, line.m, line.conta);
@@ -1329,7 +1366,7 @@ const OrcamentoApp = {
   companiesTree() {
     const q = this.query.trim().toLowerCase();
     const byEmp = new Map();
-    this.mergedAccounts().forEach((row) => {
+    this.aplicarFiltroKpi([...this.mergedAccounts().values()]).forEach((row) => {
       const blob = `${row.e} ${row.en} ${row.cc} ${row.cn} ${row.conta} ${this.accountName(row.conta)} ${row.notas || ""}`.toLowerCase();
       const empHit = !q || `${row.e} ${row.en}`.toLowerCase().includes(q);
       const ccHit = !q || `${row.cc} ${row.cn}`.toLowerCase().includes(q);
@@ -1379,6 +1416,43 @@ const OrcamentoApp = {
     });
     this._openedFor = q;
     return companies.filter((emp) => emp.costCenters.length);
+  },
+
+  KPI_ROTULO: { cart: "Carteira", vend: "Novas vendas", serv: "Serviços", ant: "Antecipação", lucro: "Lucros recebidos", aporte: "Aportes" },
+
+  /** Meses de 2027 só da classificação k. Linha com uma classificação só (ou lucro/aporte): o orçado da linha. */
+  mesesDaCategoria(row, k) {
+    const tem = (a) => Array.isArray(a) && a.some((v) => Math.abs(Number(v) || 0) >= 0.005);
+    const arr = { cart: row.cm, vend: row.vm, serv: row.sm, ant: row.am }[k];
+    if (tem(arr)) return arr.map((v) => Number(v) || 0);
+    const outras = ["cart", "vend", "serv", "ant", "lucro", "aporte"]
+      .filter((x) => x !== k && Math.abs(Number(row[x]) || 0) >= 0.005);
+    return outras.length ? this.blank() : (row.m27 || this.blank()).slice();
+  },
+
+  /** Cartão clicado: só as contas daquela classificação, com 2027 só na parte dela. 2026 segue o recebido da conta. */
+  aplicarFiltroKpi(rows) {
+    const k = this.kpiFiltro;
+    if (!k || this._semFiltroKpi) return rows;
+    const out = [];
+    rows.forEach((row) => {
+      if (!(Math.abs(Number(row[k]) || 0) >= 0.005)) return;
+      const m27 = this.mesesDaCategoria(row, k);
+      const r = Object.assign({}, row, {
+        m27: m27,
+        cart: 0, cm: this.blank(),
+        vend: 0, vm: this.blank(),
+        serv: 0, sm: this.blank(),
+        ant: 0, am: this.blank(),
+        lucro: 0, aporte: 0
+      });
+      r[k] = row[k];
+      const campoMes = { cart: "cm", vend: "vm", serv: "sm", ant: "am" }[k];
+      if (campoMes) r[campoMes] = m27.slice();
+      r.notas = this.KPI_ROTULO[k] || r.notas;
+      out.push(r);
+    });
+    return out;
   },
 
   accountBlob(conta) {
@@ -1715,13 +1789,18 @@ const OrcamentoApp = {
     const kpis = document.getElementById("orc-kpis");
     if (!body) return;
     const data = this.collect();
+    let geral = data;
+    if (this.kpiFiltro) {
+      this._semFiltroKpi = true;
+      try { geral = this.collect(); } finally { this._semFiltroKpi = false; }
+    }
     data.rows.forEach((row, i) => { row._i = i; });
     this._rows = data.rows;
     const html = data.rows.filter((row) => this.rowVisible(row)).map((row) => this.rowHtml(row));
     body.innerHTML = html.join("") || '<tr><td class="orc-empty" colspan="' + this.tableSpan() + '">Nenhuma empresa com essas contas.</td></tr>';
     if (kpis) {
-      const y26 = data.y26;
-      const y27 = data.y27;
+      const y26 = geral.y26;
+      const y27 = geral.y27;
       const corte = this.forecastIndex();
       const rec = this.sum(y26.slice(0, corte));
       const fc = this.sum(y26.slice(corte));
@@ -1734,7 +1813,7 @@ const OrcamentoApp = {
         <div class="orc-kpi-group">
           <div class="orc-kpi-year">2026</div>
           <div class="orc-kpis">
-            <div class="orc-kpi"><span>EMPRESAS</span><strong>${data.companies.length}</strong></div>
+            <div class="orc-kpi"><span>EMPRESAS</span><strong>${geral.companies.length}</strong></div>
             <div class="orc-kpi"><span>${recRotulo}</span><strong>${this.money(rec)}</strong></div>
             <div class="orc-kpi"><span>${fcRotulo}</span><strong class="orc-fc">${this.money(fc)}</strong></div>
             <div class="orc-kpi"><span>ANO COMPLETO</span><strong>${this.money(t26)}</strong></div>
@@ -1744,15 +1823,16 @@ const OrcamentoApp = {
           <div class="orc-kpi-year">2027</div>
           <div class="orc-kpis">
             <div class="orc-kpi"><span>ORÇADO</span><strong>${this.money(t27)}</strong></div>
-            <div class="orc-kpi orc-kpi-cart" data-plano="cart" data-prow="${data.rows.findIndex((r) => r.kind === "total")}"><span>CARTEIRA</span><strong class="orc-cart-col">${this.money(data.yCart)}</strong></div>
-            <div class="orc-kpi orc-kpi-vend" data-plano="vend" data-prow="${data.rows.findIndex((r) => r.kind === "total")}"><span>NOVAS VENDAS</span><strong class="orc-vend-col">${this.money(data.yVend)}</strong></div>
-            <div class="orc-kpi orc-kpi-serv" data-plano="serv" data-prow="${data.rows.findIndex((r) => r.kind === "total")}"><span>SERVIÇOS</span><strong class="orc-serv-col">${this.money(data.yServ)}</strong></div>
-            <div class="orc-kpi" data-plano="ant" data-prow="${data.rows.findIndex((r) => r.kind === "total")}"><span>ANTECIPAÇÃO</span><strong>${this.money(data.yAnt)}</strong></div>
-            <div class="orc-kpi" data-plano="lucro" data-prow="${data.rows.findIndex((r) => r.kind === "total")}"><span>LUCROS RECEBIDOS</span><strong>${this.money(data.yLucro)}</strong></div>
-            <div class="orc-kpi" data-plano="aporte" data-prow="${data.rows.findIndex((r) => r.kind === "total")}"><span>APORTES</span><strong>${this.money(data.yAporte)}</strong></div>
+            <div class="orc-kpi orc-kpi-cart${this.kpiFiltro === "cart" ? " is-on" : ""}" data-plano="cart" role="button" tabindex="0" title="Clique para filtrar a base por Carteira" data-prow="${data.rows.findIndex((r) => r.kind === "total")}"><span>CARTEIRA</span><strong class="orc-cart-col">${this.money(geral.yCart)}</strong></div>
+            <div class="orc-kpi orc-kpi-vend${this.kpiFiltro === "vend" ? " is-on" : ""}" data-plano="vend" role="button" tabindex="0" title="Clique para filtrar a base por Novas vendas" data-prow="${data.rows.findIndex((r) => r.kind === "total")}"><span>NOVAS VENDAS</span><strong class="orc-vend-col">${this.money(geral.yVend)}</strong></div>
+            <div class="orc-kpi orc-kpi-serv${this.kpiFiltro === "serv" ? " is-on" : ""}" data-plano="serv" role="button" tabindex="0" title="Clique para filtrar a base por Serviços" data-prow="${data.rows.findIndex((r) => r.kind === "total")}"><span>SERVIÇOS</span><strong class="orc-serv-col">${this.money(geral.yServ)}</strong></div>
+            <div class="orc-kpi${this.kpiFiltro === "ant" ? " is-on" : ""}" data-plano="ant" role="button" tabindex="0" title="Clique para filtrar a base por Antecipação" data-prow="${data.rows.findIndex((r) => r.kind === "total")}"><span>ANTECIPAÇÃO</span><strong>${this.money(geral.yAnt)}</strong></div>
+            <div class="orc-kpi${this.kpiFiltro === "lucro" ? " is-on" : ""}" data-plano="lucro" role="button" tabindex="0" title="Clique para filtrar a base por Lucros recebidos" data-prow="${data.rows.findIndex((r) => r.kind === "total")}"><span>LUCROS RECEBIDOS</span><strong>${this.money(geral.yLucro)}</strong></div>
+            <div class="orc-kpi${this.kpiFiltro === "aporte" ? " is-on" : ""}" data-plano="aporte" role="button" tabindex="0" title="Clique para filtrar a base por Aportes" data-prow="${data.rows.findIndex((r) => r.kind === "total")}"><span>APORTES</span><strong>${this.money(geral.yAporte)}</strong></div>
             <div class="orc-kpi"><span>VARIAÇÃO</span><strong class="${delta < 0 ? "orc-neg" : ""}">${this.money(delta)} <span class="orc-pct">${this.pctLabel(delta, t26)}</span></strong></div>
           </div>
         </div>
+        ${this.kpiFiltro ? `<div class="orc-kpi-filtro">Filtrando a base por <b>${this.esc(this.KPI_ROTULO[this.kpiFiltro] || "")}</b>. Em 2027 aparece só a parte classificada assim. Em 2026 aparece o recebido total dessas contas. <button type="button" data-kpi-limpar="1">Limpar filtro</button></div>` : ""}
       `;
     }
   },
