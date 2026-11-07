@@ -19,8 +19,63 @@ const OrcamentoApp = {
   _cartFlight: {},
   CART_LS: "crm_orcamento_carteira_2027",
 
+  /** Orçado 2027 = V2 do DFC 2027 (arquivo novo) quando existir; senão a base antiga embutida.
+   *  A classificação (carteira, vendas, antecipação, serviço…) vem de orcamento-origem.js, gerado do RECEITAS.xlsx. */
   data() {
-    return window.ORCAMENTO_RECEITA_2027 || { year: 2027, months: [], reducers: [], names: {}, lines: [] };
+    const base = window.ORCAMENTO_RECEITA_2027 || { year: 2027, months: [], reducers: [], names: {}, lines: [] };
+    const v2 = this.linhasV2();
+    return v2 ? Object.assign({}, base, { lines: v2, fonteV2: true }) : base;
+  },
+
+  pacoteV2() {
+    if (typeof OrcamentoDfcApp === "undefined") return null;
+    try { if (typeof OrcamentoDfcApp.garantir === "function") OrcamentoDfcApp.garantir(); } catch (e) {}
+    const p = OrcamentoDfcApp._v2;
+    return p && Array.isArray(p.lines) && p.lines.length ? p : null;
+  },
+
+  /** Só contas de receita (1.xx), no mesmo formato da base antiga. */
+  linhasV2() {
+    const p = this.pacoteV2();
+    if (!p) return null;
+    const marca = String(p.savedAt || 0) + "|" + p.lines.length;
+    if (this._v2Marca === marca && this._v2Linhas) return this._v2Linhas;
+    const linhas = p.lines
+      .filter((l) => l && /^1\./.test(String(l.conta || "").trim()))
+      .map((l) => ({
+        e: String(l.e || "").trim(),
+        en: String(l.enome || "").trim(),
+        cc: String(l.cc || "").trim(),
+        cn: String(l.en || "").trim(),
+        conta: String(l.conta || "").trim(),
+        nome: String(l.cn || "").trim(),
+        m: (Array.isArray(l.m) ? l.m : []).slice(0, 12).map((v) => Number(v) || 0)
+      }));
+    this._v2Marca = marca;
+    this._v2Linhas = linhas.length ? linhas : null;
+    return this._v2Linhas;
+  },
+
+  /** Busca a V2 no Firebase (para quem nunca abriu o DFC 2027 neste navegador ou tem uma V2 antiga). */
+  async garantirV2() {
+    if (this._v2Pedido || typeof OrcamentoDfcApp === "undefined" || typeof OrcamentoDfcApp.lerDocOrcamento !== "function") return;
+    this._v2Pedido = true;
+    try {
+      const doc = await OrcamentoDfcApp.lerDocOrcamento("2027_v2");
+      if (!doc) return;
+      const atual = this.pacoteV2();
+      if (atual && Number(atual.savedAt) >= Number(doc.savedAt)) return;
+      const pack = typeof OrcamentoDfcApp.copiarPack === "function"
+        ? OrcamentoDfcApp.copiarPack(doc, { versao: "2" })
+        : Object.assign({ versao: "2" }, doc);
+      if (!pack) return;
+      OrcamentoDfcApp._v2 = pack;
+      if (typeof OrcamentoDfcApp.gravarChave === "function") OrcamentoDfcApp.gravarChave(OrcamentoDfcApp.LS_V2, pack);
+      this._v2Marca = null;
+      this.render();
+    } catch (e) {
+      console.warn("[Orçamento] V2 do Firebase", e);
+    }
   },
 
   reducers() {
@@ -84,6 +139,7 @@ const OrcamentoApp = {
     });
     this.render();
     this.garantirCaixa();
+    this.garantirV2();
   },
 
   forecastIndex() {

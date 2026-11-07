@@ -206,8 +206,40 @@ const GerarPagamentoApp = {
     return "crm_lotes_conf_" + quem + "_" + dia;
   },
 
+  /** Todas as chaves possíveis da pessoa (e-mail e nome, de cada origem do usuário). O usuário chega
+   *  com ou sem e-mail conforme o momento do login; com uma chave só, o Fechar não valia na abertura seguinte. */
+  chavesConferenciaLotes(dia) {
+    const fontes = [this.usuarioConferencia(), window.AppState && window.AppState.currentUser];
+    try { fontes.push(JSON.parse(localStorage.getItem("crm_logged_user") || "null")); } catch (e) {}
+    const imp = typeof window.crmImpersonacaoAtual === "function" ? window.crmImpersonacaoAtual() : null;
+    const quem = new Set();
+    fontes.forEach((u) => {
+      if (!u) return;
+      // Impersonando: só a pessoa vista conta, para não marcar o administrador.
+      if (imp && u !== imp) return;
+      [u.email, u.name].forEach((v) => {
+        const s = String(v || "").trim().toLowerCase();
+        if (s) quem.add(s);
+      });
+    });
+    if (!quem.size) quem.add("op");
+    return [...quem].map((q) => "crm_lotes_conf_" + q + "_" + dia);
+  },
+
+  conferenciaJaVista(dia) {
+    if (this._confVistaDia === dia) return true;
+    try {
+      return this.chavesConferenciaLotes(dia).some((k) => localStorage.getItem(k) === "ciente");
+    } catch (e) {
+      return false;
+    }
+  },
+
   marcarConferenciaVista(dia) {
-    try { localStorage.setItem(this.chaveConferenciaLotes(dia), "ciente"); } catch (e) {}
+    this._confVistaDia = dia;
+    try {
+      this.chavesConferenciaLotes(dia).forEach((k) => localStorage.setItem(k, "ciente"));
+    } catch (e) {}
   },
 
   /** 15:30: pede para atualizar a situação dos lotes. Se o login for depois, abre na hora, uma vez no dia. */
@@ -230,7 +262,7 @@ const GerarPagamentoApp = {
   abrirConferenciaLotes() {
     if (!this.usuarioVeConferenciaLotes()) return;
     const hoje = this.iso(new Date());
-    try { if (localStorage.getItem(this.chaveConferenciaLotes(hoje)) === "ciente") return; } catch (e) {}
+    if (this.conferenciaJaVista(hoje)) return;
     if (document.getElementById("gp-conf-lotes")) return;
     const overlay = document.createElement("div");
     overlay.id = "gp-conf-lotes";
